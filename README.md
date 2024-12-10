@@ -24,7 +24,8 @@ attribute types. One guiding principle for hierarchy design is to set
 the factors for each level such that more similar layers are closer
 together in the hierarchy.
 
-The two main analysis methods available in *HMNM* are RWR and the AMEND
+The two main analysis methods available in *HMNM* are RWR and the
+[AMEND](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC10324253/)
 algorithm (Active Module identification with Experimental data and
 Network Diffusion), both generalized for hierarchical multilayer
 networks. Random Walk with Restart (RWR) is a powerful network diffusion
