@@ -30,11 +30,13 @@ Below is an example of a hierarchy for a multilayer network. There are 3 levels 
 
 ```{r intro1, echo=FALSE, out.width="100%", fig.cap="Figure 1: Network Hierarchy", fig.align='center'}
 library(HMNM)
-knitr::include_graphics(system.file("vignettes/images/example_hierarchy_root2.png", package = "HMNM"))
+# knitr::include_graphics(system.file("vignettes/images/example_hierarchy_root2.png", package = "HMNM"))
+knitr::include_graphics("man/figures/example_hierarchy_root2.png")
 ```
 
 ```{r intro2, echo=FALSE, out.width="100%", fig.cap="Figure 2: Multilayer Adjacency Matrix", fig.align='center'}
-knitr::include_graphics(system.file("vignettes/images/example_adjmat.png", package = "HMNM"))
+# knitr::include_graphics(system.file("vignettes/images/example_adjmat.png", package = "HMNM"))
+knitr::include_graphics("man/figures/example_adjmat.png")
 ```
 
 The two main analysis methods available in _HMNM_ are RWR and the [AMEND](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC10324253/) algorithm (Active Module identification with Experimental data and Network Diffusion), both generalized for hierarchical multilayer networks. Random Walk with Restart (RWR) is a powerful network diffusion method that returns node scores reflecting proximity in the network to other high scoring nodes. Node scores can be used for node ranking, link prediction, or machine learning algorithms. AMEND is an active module identification method that finds a single, connected module of densely connected nodes with large experimental values (e.g., from 'omic experiments). It uses RWR to create node weights, which are used to find a maximum-weight connected subnetwork, with this subnetwork used as input into RWR for the next iteration. This continues until an optimal subnetwork (i.e., module) is found. AMEND can accommodate multilayer networks, making it a widely applicable tool. These complex networks can include several node types, edge types, and data types. 

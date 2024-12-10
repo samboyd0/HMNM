@@ -45,7 +45,7 @@ and inter-layer/bipartite adjacency matrices are given by **B**’s.
 
 <div class="figure" style="text-align: center">
 
-<img src="../../../../../../private/var/folders/pv/9s_1r_dd5hs8kqsz7t6krv0m0000gn/T/RtmpOrbi2F/temp_libpath25376bb1d393/HMNM/vignettes/images/example_hierarchy_root2.png" alt="Figure 1: Network Hierarchy" width="100%" />
+<img src="man/figures/example_hierarchy_root2.png" alt="Figure 1: Network Hierarchy" width="100%" />
 <p class="caption">
 Figure 1: Network Hierarchy
 </p>
@@ -54,7 +54,7 @@ Figure 1: Network Hierarchy
 
 <div class="figure" style="text-align: center">
 
-<img src="../../../../../../private/var/folders/pv/9s_1r_dd5hs8kqsz7t6krv0m0000gn/T/RtmpOrbi2F/temp_libpath25376bb1d393/HMNM/vignettes/images/example_adjmat.png" alt="Figure 2: Multilayer Adjacency Matrix" width="100%" />
+<img src="man/figures/example_adjmat.png" alt="Figure 2: Multilayer Adjacency Matrix" width="100%" />
 <p class="caption">
 Figure 2: Multilayer Adjacency Matrix
 </p>
