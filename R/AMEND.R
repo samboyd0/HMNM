@@ -1,103 +1,119 @@
 #' @importFrom igraph vcount V V<- E E<- vertex_attr vertex_attr<-
 #' @importFrom stats sd quantile
-#' @importFrom foreach %dopar%
 
 
 #' @title Identify modules from a network
 #' 
 #' @description 
-#' Given a network (or several networks, to be connected) with node-wise data, `module_identification()` uses the AMEND algorithm to identify a module containing highly-connected nodes with large data values.
+#' Given a network (or several networks, to be connected) with node-wise data, `module_identification()` uses the __AMEND__ algorithm to identify a single module containing highly-connected nodes with large data values. `AMEND()` is an alias.
 #'
-#' @details 
+#' @section Algorithm Overview: 
 #' 
-#' `module_identification()`is powered by a generalized RWR algorithm that can analyze multilayer networks where nodes are categorized by overlapping factors organized hierarchically. This hierarchy is supplied by the user as a directed edeglist and governs the construction of the transition matrix for RWR, with information being shared more readily between layers that lie closer in the hierarchy. See [transition_matrix()] for more details on the transition matrix construction process.
+#' The AMEND algorithm iteratively performs Random Walk with Restart (RWR) to obtain node scores which are used to heuristically find a maximum-weight connected subgraph. This subgraph is input for the next iteration, and the process continues until the subgraph size is close to the user-specified size __n__ or there is no change in network between iterations. See the [manuscript](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC10324253/) for more details.
+#'
+#' @section Network Hierarchy: 
 #' 
-#' The hierarchy can have an arbitrary number of levels, where each level is associated with a factor (e.g., tissue, molecule, data type). Each leaf in the hierarchy (i.e., category with no child categories) corresponds to a layer in the multilayer network, and the nodes in a layer are defined by the categories of its ancestors in the hierarchy. 
+#' __AMEND__ is powered by a generalized RWR algorithm that can analyze multilayer networks where nodes are categorized by overlapping factors organized hierarchically. This hierarchy is supplied by the user as a directed edeglist and governs the construction of the transition matrix for RWR, with information being shared more readily between layers that lie closer in the hierarchy. 
 #' 
-#' Users can supply layers as separate network-like objects (igraph, adjacency matrix, or edgelist) in a named list, where names correspond to categories in hierarchy. Similar inputs can be given for bipartite mappings between layers, where list names denote the layer names to which the mapping will be applied, with multiple layer names separated by "|". Networks can be (un)weighted and/or (un)directed. An integrated network will be constructed from the network_layers and bipartite_networks inputs (see [create_integrated_network()]).
+#' The hierarchy can have an arbitrary number of levels, where each level is associated with a factor (e.g., tissue, molecule, data type). Each leaf in the hierarchy (i.e., category with no child categories, bottom level) corresponds to a layer in the multilayer network, and the nodes in a layer are defined by the categories of its ancestors in the hierarchy. See [create_network_hierarchy()] for more details.
 #' 
-#' Seed values for RWR are computed from _data_, _FUN_, and _FUN_params_. Users can also supply node-wise values in _brw_attr_ for a biased random walk, where larger values will increase transition probabilities to nodes during RWR.
+#' @section Network Inputs: 
 #' 
-#' Transition matrices can be created through classic column-normalization (normalize = "degree") or through a modified column-normalization (normalize = "modified_degree") which penalizes transitions to nodes as a function of node degree (to combat degree bias). The _degree_bias_ argument can further mitigate degree bias by applying a degree bias adjustment method to specific layers in the network (see [bistochastic_scaling()]).
+#' Users can supply layers as separate network-like objects (igraph, adjacency matrix, or edgelist) in a named list, where names correspond to categories in hierarchy. Similar inputs can be given for bipartite mappings between layers, where list names denote the layer names to which the mapping will be applied, with multiple layer names separated by "|". Networks can be (un)weighted and/or (un)directed. A single, connected network will be constructed from the __network_layers__ and __bipartite_networks__ inputs (see [create_integrated_network()]).
 #' 
-#' _crosstalk_params_ are parameters that control the amount of information shared between layers. They represent the probability of the random walker to jump from the current layer to another through a bipartite edge during RWR.
+#' @section Seed Value and Transition Matrix Calculation: 
 #' 
-#' _seed_weights_ represent the relative weight to give to seeds values of a certain layer or sets of layers. These should be supplied for all sets of categories in hierarchy that share a common parent (i.e., siblings).
+#' Seed values for RWR are computed from __data__, __FUN__, and __FUN_params__. Users can also supply node-wise values in __brw_attr__ for a biased random walk, where larger values will increase transition probabilities to nodes during RWR. The __brw_attr__ argument can also be a character vector of node names. Continuous values for biased random walk will be generated for each node as an inverse function of distance to the given nodes.
 #' 
-#' The AMEND algorithm iteratively performs Random Walk with Restart (RWR) to obtain node scores which are used to heuristically find a maximum-weight connected subgraph. This subgraph is input for the next iteration, and the process continues until the subgraph size is close to the user-specified size _n_. See the [manuscript](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC10324253/) for more details.
+#' Transition matrices can be created through classic column-normalization (__normalize__ = "degree") or through a modified column-normalization (__normalize__ = "modified_degree") which penalizes transitions to nodes as a function of node degree (to combat degree bias). See [transition_matrix()] for more details on the transition matrix construction process. 
 #' 
-#' @param network_layers,bipartite_networks Single network-like object (igraph, adjacency matrix, or edgelist) or a list of these. If a list, it must be named, with names matching category names in network_hierarchy. If multiple layers are contained in a single object, the list name must include these layer names separated by "|". bipartite_networks objects should contain the mappings between different layers. Elements in bipartite_networks list can be set to "common", which will connect all common nodes between the designated layers.
-#' @param network_hierarchy A 2-column matrix representing an edgelist for the network hierarchy, where hierarchy vertices represent categories which categorize the network nodes. Or an object of class 'hierarchy' as a result from `create_network_hierarchy()`.
-#' @param n Final module size which the algorithm will try to approximate.
-#' @param data Named list of numeric vectors, or a single numeric vector, containing numeric values from which seed values for RWR will be calculated (with _FUN_ and _FUN_params_), a character string, or NULL. Names of list should match layer names. Numeric values must be named with the corresponding node name. If a string, this should be the vertex attribute name (for igraph inputs) containing the data.
-#' @param brw_attr Similar format as _data_. Contains values to be used in a biased random walk.
-#' @param FUN Function, list of functions, or a character string denoting a default function ('binary', 'shift_scale', 'p_value', or 'exp'), to be applied to _data_ to compute seed values for RWR. Names of list must match layer names. NULL (default) applies no transformation of values in _data_. Optional function arguments given in _FUN_params_. 
-#' @param FUN_params List or list of lists, containing additional function arguments for functions given in _FUN_. NULL (default) doesn't supply any additional function arguments.
-#' @param directed Logical. Whether the input network should be treated as directed.
-#' @param aggregate_layers List containing sets of layer names to aggregate after RWR but before node filtering, or NULL (default). First layer in a set is taken as the primary layer, whose edges will be preferentially used during node filtering step in AMEND. See [create_aggregated_graph()].
-#' @param normalize Adjacency matrix normalization method to construct transition matrix.
-#' @param k Penalization factor for normalize="modified_degree". Must be non-negative, with larger values resulting in a greater penalty for node degree, in an effort to mitigate degree bias.
-#' @param degree_bias A character vector or list, or NULL (default). The character vector denotes the layers to which the degree bias mitigation method will be applied. The list must contain this character vector of layers (named 'layers') and a numeric scalar (named 'gamma') between 0 and 1 denoting the strength of degree bias mitigation. The default gamma value is 0.2.
-#' @param crosstalk_params A named numeric vector containing the crosstalk parameters for each category in network hierarchy. If NULL (default), a uniform value of 0.5 is set. Hierarchicy categories not given in _crosstalk_params_ will be given this default value of 0.5.
-#' @param seed_weights A list of named numeric vectors, or NULL (default). List elements should correspond to sibling sets of categories in network hierarchy. Values in each set must sum to one. NULL gives uniform values within each sibling set.
+#' The __degree_bias__ argument can further mitigate degree bias by applying a degree bias adjustment method to specific layers in the network (see [bistochastic_scaling()]).
+#' 
+#' @section Aggregating Layers: 
+#' 
+#' In multilayer networks, there is the option to aggregate sets of layers after [RWR()] but prior to [solve_MWCS()]. For a given set of layers, the first layer listed is designated as the 'primary' layer. All nodes and edges of the primary layer will be kept in the aggregated network. Then, moving sequentially through the remaining layers in the set, edges (along with their adjacent nodes) are added only if at least one of its adjacent nodes is not already in the aggregated layer. RWR scores of common nodes will be averaged. This can be useful if certain layers only differ by their edge type (e.g., physical vs. functional interactions between proteins) and the user wants the module to only contain edges of a certain type.
+#' 
+#' @section Additional Parameters: 
+#' 
+#' __crosstalk_params__ and __seed_weights__ are additional sets of parameters that allow fine control over diffusion dynamics during [RWR()].
+#' 
+#' __crosstalk_params__ are parameters that control the amount of information shared between layers. They represent the probability of the random walker to jump from the current layer to another through a bipartite edge during RWR.
+#' 
+#' __seed_weights__ represent the relative weight to give to seeds values of a certain layer or sets of layers. These should be supplied for all sets of categories in hierarchy that share a common parent (i.e., siblings).
+#' 
+#' @note
+#' `module_identification()` uses _node_specific_restart_=TRUE for `RWR()`, with _node_connectivity_score_ coming from `node_connectivity_score(..., inverse=TRUE, mode="core")`.
+#' 
+#' @inheritParams create_integrated_network
+#' @inheritParams RWR
+#' @inheritParams transition_matrix
+#' @param n Final module size which the algorithm will try to approximate. NULL to get maximum-scoring subnetwork.
+#' @param aggregate_layers NULL (default) or a list containing sets of layer names to aggregate after RWR but before node filtering. Set to NULL for no aggregation. The first layer in a set is taken as the primary layer, whose edges will be preferentially used during the node filtering step in AMEND.
 #' @param verbose Logical. Whether to print information on algorithm progress.
-#' @param in_parallel Logical. Whether to run certain operations in parallel, using the _parallel_, _doParallel_ and _foreach_ packages.
-#' @param n_cores Numeric scalar or NULL (default). Number of cores to use during parallel processing. When NULL and in_parallel=TRUE, defaults to two-thirds the number of cores detected on machine.
 #' @param eta Numeric scalar or NULL (default). Starting filtering rate for AMEND algorithm. If NULL, this is set automatically to approximate the user-specified final module size _n_.
 #' 
 #' @return a named list with the following elements:
-#' * module: the final module (i.e., subnetwork)
+#' * module: igraph of the final module (i.e., subnetwork)
 #' * score: final module score
 #' * subnetworks: a list of node names contained in intermediate subnetworks
-#' * stats: network and algorithm statistics
+#' * stats: data.frame of network and algorithm statistics
 #' * time: run time
 #' * input_params: list of input parameters
 #' 
-#' @seealso [create_integrated_network()], [create_network_hierar], [transition_matrix()], [RWR()], [create_aggregated_graph()]
+#' @aliases AMEND
+#' 
+#' @seealso [create_integrated_network()], [create_network_hierarchy], [transition_matrix()], [RWR()], [solve_MWCS()]
 #' 
 #' @examples
+#' # Attach igraph library
+#' library(igraph)
+#' 
+#' # Inspect the multilayer network objects included in the package
+#' multilayer_network # List object with 5 igraphs
+#' interlayer_links 
+#' multilayer_hierarchy # matrix representing a directed edgelist
+#' 
+#' # Inspect data to be mapped to nodes in multilayer network
+#' # Represents p-values generated from runif
+#' lapply(multilayer_data_runif, head)
+#' 
+#' crosstalk_params <- c(protdat = 0.2, phosphdat = 0.4, meta = 0.6)
+#' 
+#' seed_weights <- list(c(protdat = 0.4, phosphdat = 0.6), 
+#'                      c(prot = 0.7, meta = 0.3),
+#'                      c(prot2 = 0.7, meta2 = 0.3))
+#' 
+#' # Identify an active module from multilayer network
+#' mod <- module_identification(network_layers = multilayer_network,
+#'                             bipartite_networks = interlayer_links,
+#'                             network_hierarchy = multilayer_hierarchy,
+#'                             n = 50,
+#'                             data = multilayer_data_runif,
+#'                             FUN = "p_value",
+#'                             normalize = "degree",
+#'                             crosstalk_params = crosstalk_params,
+#'                             seed_weights = seed_weights)
+#' # Use alias 'AMEND()'
+#' if(FALSE) {
+#' mod <- AMEND(network_layers = multilayer_network,
+#'              bipartite_networks = interlayer_links,
+#'              network_hierarchy = multilayer_hierarchy,
+#'              n = 50,
+#'              data = multilayer_data_runif,
+#'              FUN = "p_value",
+#'              normalize = "degree",
+#'              crosstalk_params = crosstalk_params,
+#'              seed_weights = seed_weights)
+#' }
+#' 
 #' 
 #' @export
 #' 
-module_identification <- function(network_layers, bipartite_networks = NULL, network_hierarchy = NULL, n = 50, data = NULL, brw_attr = NULL,
+module_identification <- function(network_layers, bipartite_networks = NULL, network_hierarchy = NULL, n = NULL, data = NULL, brw_attr = NULL,
                                   FUN = NULL, FUN_params = NULL, directed = FALSE, aggregate_layers = NULL,
                                   normalize = c("degree", "modified_degree"), k = 0.5, degree_bias = NULL,
                                   crosstalk_params = NULL, seed_weights = NULL, verbose = FALSE, 
                                   in_parallel = FALSE, n_cores = NULL, eta = NULL){
-  # TEST
-  if(0){
-    source("/Users/samboyd/Documents/NHNM/R package/TEST/TEST_create_integrated_network.R")
-    source("/Users/samboyd/Documents/NHNM/R package/NHNM/R/create_integrated_network.R")
-    source("/Users/samboyd/Documents/NHNM/R package/NHNM/R/RandomWalk.R")
-    source("/Users/samboyd/Documents/NHNM/R package/NHNM/R/AMEND.R")
-    source("/Users/samboyd/Documents/NHNM/R package/NHNM/R/solve_MWCS.R")
-
-    
-    # network_layers = network_layers
-    # bipartite_networks = bipartite_networks
-    # network_hierarchy = network_hierarchy
-    # data = data
-    # FUN = FUN
-    # FUN_params = FUN_params
-    # directed = directed
-    # brw_attr = brw_attr
-    # lcc = lcc
-    # in_parallel = in_parallel
-    # n_cores = n_cores
-    
-    normalize = "modified_degree"
-    k = 0.5
-    crosstalk_params = c(protdat = 0.8, phosphdat = 0.4, meta = 0.2)
-    degree_bias = list(layers = "prot", gamma = 0.1)
-    restart = 0.5
-    seed_weights = NULL
-
-    
-    aggregate_layers = list(c("protdat", "phosphdat"), c("metadat", "metadat2"), method = "mean")
-    verbose = FALSE
-    net_diam_prop = -1
-  }
-  
   start_time <- Sys.time()
   
   #=== Function Settings ===#
@@ -120,8 +136,18 @@ module_identification <- function(network_layers, bipartite_networks = NULL, net
   graph <- g_int$network
   network_hierarchy <- g_int$hierarchy
   
+  # Ensuring that 'directed' object accurately reflects the graph object
+  if(igraph::is_directed(graph)) {
+    directed <- TRUE
+  }
+  
   # Flag for whether Biased Random Walk value is calculated by inverse distance from set of nodes of interest (NOI)
   BRW_NOI_FLAG <- is.character(brw_attr) && length(brw_attr) > 1
+  
+  if(is.null(n)) {
+    n <- 10
+    n_NULL_FLAG <- TRUE
+  } else n_NULL_FLAG <- FALSE
   
   #========================#
   # Create aggregated graph
@@ -222,7 +248,7 @@ module_identification <- function(network_layers, bipartite_networks = NULL, net
       rgs <- restart_grid_search(orig_net = subg[[1]], 
                                  agg_net = sub_ag[[1]], 
                                  network_hierarchy = net_hier, 
-                                 norm = normalize, 
+                                 normalize = normalize, 
                                  k = k, 
                                  crosstalk_params = crosstalk_params, 
                                  seed_weights = seed_weights, 
@@ -256,6 +282,7 @@ module_identification <- function(network_layers, bipartite_networks = NULL, net
       names(all_scores[[length(all_scores)]]) <- c("Restart parameter", "Network score", "Avg seed Z-score", "Avg connectivity score", 
                                                    "Node count", "Edge count", "Density", "Filtering rate", "Observed filtering rate", "Decay")
       all_nets[[length(all_nets) + 1]] <- V(sub_ag[[2]])$name
+      names(all_nets[[length(all_nets)]]) <- V(sub_ag[[2]])$agg_layer
       
       # Updating network hierarchy object 'net_hier'
       rm_layers <- setdiff(unique(V(subg[[1]])$layer), unique(V(subg[[2]])$layer))
@@ -284,28 +311,34 @@ module_identification <- function(network_layers, bipartite_networks = NULL, net
     all_scores <- do.call("rbind", all_scores)
     all_scores <- round(as.data.frame(all_scores), 3)
     
-    # Currently, final module cannot be larger than twice the user-specified 'n'
-    size_col <- "Node count"
-    size_window <- 2
-    size_cond <- all_scores[, size_col] <= size_window * n & all_scores[, size_col] >= (1 / size_window) * n
-    if(any(size_cond)) {
-      break
+    if(n_NULL_FLAG) {
+      size_cond <- rep(TRUE, nrow(all_scores))
     } else {
-      if(verbose) message(paste0("Algorithm didn't converge with eta=", round(eta, 4), ". Trying a larger starting filtering rate."))
-      if(eta == 1) stop("Algorithm is unable to converge. Try a larger 'n'.")
-      eta <- eta * 1.1 # increase by 10%
-      if(eta > 1) eta <- 1
+      # Currently, final module cannot be larger than twice the user-specified 'n'
+      size_col <- "Node count"
+      size_window <- 2
+      size_cond <- all_scores[, size_col] <= size_window * n & all_scores[, size_col] >= (1 / size_window) * n
+      if(any(size_cond)) {
+        break
+      } else {
+        if(verbose) message(paste0("Algorithm didn't converge with eta=", round(eta, 4), ". Trying a larger starting filtering rate."))
+        if(eta == 1) stop("Algorithm is unable to converge. Try a larger 'n'.")
+        eta <- eta * 1.1 # increase by 10%
+        if(eta > 1) eta <- 1
+      }
     }
   }
   
   # Choosing subnetwork with maximum score and (in the case of ties) closest to final module size 'n'
   # and in case of two networks with same max score and same distance from 'n', choose larger subnetwork
   score_col <- "Network score"
-  if(sum(all_scores[size_cond, score_col] == max(all_scores[size_cond, score_col])) > 1) { # Handling ties
+  if(sum(all_scores[size_cond, score_col] == max(all_scores[size_cond, score_col])) > 1 && !n_NULL_FLAG) { # Handling ties
     d <- abs(all_scores[,size_col] - n)
     ids <- which(all_scores[,score_col] == max(all_scores[size_cond, score_col]) & size_cond)
     max_id <- which(all_scores[,score_col] == max(all_scores[size_cond, ]) & d == min(d[ids]) & size_cond)[1]
-  } else max_id <- which(all_scores[,score_col] == max(all_scores[size_cond, score_col]) & size_cond)
+  } else {
+    max_id <- which(all_scores[,score_col] == max(all_scores[size_cond, score_col]) & size_cond)[1]
+  }
   
   best_sn <- igraph::induced_subgraph(agg_graph, which(V(agg_graph)$name %in% all_nets[[max_id]]))
   best_score <- all_scores[max_id, score_col]
@@ -320,47 +353,22 @@ module_identification <- function(network_layers, bipartite_networks = NULL, net
   return(list(module = best_sn, score = best_score, subnetworks = all_nets, stats = all_scores, time = time, input_params = input_params))
 }
 
-# TEST
-if(0){
-  source("/Users/samboyd/Documents/NHNM/R package/TEST/TEST_create_integrated_network.R")
-  source("/Users/samboyd/Documents/NHNM/R package/NHNM/R/create_integrated_network.R")
-  source("/Users/samboyd/Documents/NHNM/R package/NHNM/R/RandomWalk.R")
-  source("/Users/samboyd/Documents/NHNM/R package/NHNM/R/AMEND.R")
-  source("/Users/samboyd/Documents/NHNM/R package/NHNM/R/solve_MWCS.R")
-  
-  
-  mod = module_identification(network_layers = network_layers,
-                              bipartite_networks = bipartite_networks,
-                              network_hierarchy = network_hierarchy,
-                              n = n,
-                              data = data,
-                              FUN = FUN,
-                              FUN_params = FUN_params,
-                              directed = directed,
-                              brw_attr = brw_attr,
-                              in_parallel = TRUE,
-                              n_cores = n_cores,
-                              normalize = normalize,
-                              k = k,
-                              crosstalk_params = crosstalk_params,
-                              degree_bias = degree_bias,
-                              seed_weights = seed_weights,
-                              aggregate_layers = aggregate_layers,
-                              verbose = TRUE)
-  
-  mod$time
-  mod$module
-  table(V(mod$module)$layer)
-  mod$stats
-  plot(mod$module, layout = layout_on_sphere(mod$module))
+
+#' @inherit module_identification
+#' @export
+AMEND <- function(...) {
+  module_identification(...)
 }
 
 
-#' @title Get a larger subnetwork from previous iterations of the AMEND algorithm in `module_identification()`
+#' @title Get a larger subnetwork from previous iterations of the AMEND algorithm
 #'
 #' @description
 #' This function allows the user to examine intermediate subnetworks that were generated during `module_identification()`, since the algorithm may overshoot the approximate final module size, or the user may be interested in the parent subnetworks of the final module.
-#'
+#' 
+#' @details
+#' Since __AMEND__ iteratively filters out nodes to arrive at a final module, there are intermediate subnetworks associated with each iteration. A subnetwork at an earlier iteration contains the subnetworks of all later iterations. This function can be used to investigate these earlier subnetworks, for example, to identify when in the algorithm certain nodes were removed.
+#' 
 #' @param ig Input network
 #' @param amend_object Result from `module_identification()`
 #' @param k Iteration associated with the subnetwork you want to retrieve
@@ -368,12 +376,120 @@ if(0){
 #' @returns igraph object of the subnetwork associated with the given iteration.
 #'
 #' @examples
-#'
+#' # Attach igraph library
+#' library(igraph)
+#' 
+#' # Perform module identification 
+#' mod <- module_identification(network_layers = simple_network, n = 25)
+#' 
+#' # Get the processed igraph of the input network
+#' g <- create_integrated_network(network_layers = simple_network)
+#' 
+#' # Get the subnetwork from the end of the 4th iteration of the AMEND algorithm
+#' get_subnetwork(ig = g$network, amend_object = mod, k = 4)
+#' 
 #' @export
 #' 
 get_subnetwork <- function(ig, amend_object, k) {
   nodes <- amend_object$subnetworks[[k]]
   igraph::induced_subgraph(ig, which(V(ig)$name %in% nodes))
+}
+
+
+#' @title Calculate core-clustering coefficients
+#'
+#' @description `core_cc()` calculates the core-clustering coefficients of all nodes in a graph. This network concept was introduced by _Bader & Hogue_ (2003).
+#'
+#' @details The core-clustering coefficient of a node is the edge density of the maximum k-core of the immediate neighborhood of that node. The k-core of a graph is the maximal subgraph in which every node has degree >= k.
+#'
+#' @param g igraph. Must be connected
+#' @param weight Logical. If true, the edge density is calculated taking into account edge weights
+#'
+#' @returns Vector of core-clustering coefficients for each node
+#'
+#' @examples
+#' library(igraph)
+#' 
+#' graph <- sample_pa(n = 100, power = 1.2)
+#' core_cc(graph)
+#'
+#' @export
+#'
+core_cc <- function(g, weight = TRUE) {
+  if(!"weight" %in% igraph::edge_attr_names(g) && weight) {
+    weight <- FALSE
+  }
+  n <- vcount(g)
+  w <- numeric(n)
+  for(i in seq_len(n)) {
+    nborhood <- igraph::make_ego_graph(g, order = 1, nodes = i, mode = "all")[[1]]
+    cores <- igraph::coreness(nborhood, mode = "all")
+    max_core <- igraph::induced_subgraph(nborhood, which(cores == max(cores)))
+    w[i] <- edge_density_weighted(max_core, weight = weight)
+  }
+  return(w)
+}
+
+
+#' @title Calculate a node-wise connectivity score
+#' 
+#' @description
+#' Calculates a centrality or several centrality metrics and converts to empirical cumulative probabilities. inverse=TRUE multiplies values by -1 before ECDF calculation.
+#' 
+#' @details
+#' For mode="core", only considers the coreness of nodes when calculating ECDF. For mode="mix", it considers a mix of betweenness centrality, harmonic centrality, and core clustering coefficient, aggregated by applying ECDF to each score individually then taking a weighted average of these probabilities.
+#'
+#' @param graph igraph
+#' @param net_diam_prop numeric. Proportion of graph to use when calculating betweenness and harmonic centrality, for mode="mix" only.
+#' @param inverse Logical. Whether to return values inversely related to connectivity measure selected in __mode__.
+#' @param mode character scalar. One of "core" or "mix"
+#' 
+#' @returns numeric vector
+#' 
+#' @examples
+#' net <- create_integrated_network(network_layers = simple_network, lcc = TRUE)$network
+#' ncs <- node_connectivity_score(graph = net, inverse = FALSE, mode = "core")
+#' ncs_inv <- node_connectivity_score(graph = net, inverse = TRUE, mode = "core")
+#' node_coreness <- core_cc(g = net)
+#' cor(node_coreness, ncs)
+#' cor(node_coreness, ncs_inv)
+#' 
+#' @export
+#'
+node_connectivity_score <- function(graph, net_diam_prop = -1, inverse = FALSE, mode = c("core", "mix")) {
+  
+  mode <- match.arg(mode)
+  
+  # net_diam_prop
+  if(net_diam_prop > 1) stop("'net_diam_prop' must be negative or between 0 and 1.")
+  
+  # Centrality measures
+  if(net_diam_prop < 0) {
+    kpath <- net_diam_prop
+  } else {
+    kpath <- net_diam_prop * igraph::diameter(graph = graph, directed = TRUE)
+  }
+  
+  if(mode == "mix") {
+    c_val <- data.frame(ccc = core_cc(graph, weight = TRUE),
+                        bc = igraph::betweenness(graph = graph, directed = TRUE, normalized = TRUE, cutoff = kpath),
+                        hc = igraph::harmonic_centrality(graph = graph, mode = 'out', normalized = TRUE, cutoff = kpath),
+                        row.names = V(graph)$name)
+  } else if(mode == "core") {
+    c_val <- data.frame(core = igraph::coreness(graph = graph, mode = "all"),
+                        row.names = V(graph)$name)
+  }
+  
+  
+  # Calculate eCDF & Calculate empirical cumulative probabilities
+  k <- ifelse(inverse, -1, 1)
+  for(j in seq_len(ncol(c_val))) {
+    FUN <- stats::ecdf(k * c_val[,j])
+    c_val[,j] <- FUN(k * c_val[,j])
+  }
+  agg_cent <- round(apply(c_val, 1, mean), 4)
+  
+  return(agg_cent)
 }
 
 
@@ -392,17 +508,13 @@ get_subnetwork <- function(ig, amend_object, k) {
 #'
 #' @seealso [melt_graph()], [expand_graph()], [module_identification()]
 #'
-#' @export
+#' @noRd
 #' 
 create_aggregated_graph <- function(graph, agg_sets, agg_fun, directed) {
-  if(0){ # TEST
-    agg_sets = aggregate_layers
-  }
   
   original_classes <- class(graph)
   
   V(graph)$agg_layer <- V(graph)$layer
-  # V(graph)$agg_name <- V(graph)$name
   
   for(i in seq_along(agg_sets)) {
     all_nodes <- extract_string(V(graph)$name, "\\|", 1)
@@ -411,13 +523,6 @@ create_aggregated_graph <- function(graph, agg_sets, agg_fun, directed) {
     primary_layer <- agg_sets[[i]][1]
     other_layers <- agg_sets[[i]][-1]
     new_layer_name <- names(agg_sets)[i]
-    # new_layer_name <- paste0("agg", i)
-    # ii <- 1
-    # repeat {
-    #   if(!new_layer_name %in% V(graph)$agg_layer) break
-    #   new_layer_name <- paste0("agg", i + ii)
-    #   ii <- ii + 1
-    # }
     
     primary_ids <- which(V(graph)$layer == primary_layer)
     
@@ -449,39 +554,6 @@ create_aggregated_graph <- function(graph, agg_sets, agg_fun, directed) {
   }
   class(graph) <- original_classes
   return(graph)
-}
-
-
-#' @title Calculate the core-clustering coefficients of nodes in a graph
-#'
-#' @description `core_cc()` calculates the core-clustering coefficients of all nodes in a graph. This network concept was introduced by Bader and Hogue (2003)
-#'
-#' @details The core-clustering coefficient of a node is the density of the maximum k-core of the immediate neighborhood of that node. The k-core of a graph is the maximal subgraph in which every node has degree >= k.
-#'
-#' @param g Input graph. Must be connected
-#' @param weight Logical. If true, the edge density is calculated taking into account edge weights
-#'
-#' @returns Vector of core-clustering coefficients for each node
-#'
-#' @examples
-#' core_clust_coefs = AMEND:::core_cc(glut4_graph)
-#' head(core_clust_coefs)
-#'
-#' @export
-#'
-core_cc <- function(g, weight = TRUE) {
-  if(!"weight" %in% igraph::edge_attr_names(g) && weight) {
-    weight <- FALSE
-  }
-  n <- vcount(g)
-  w <- numeric(n)
-  for(i in seq_len(n)) {
-    nborhood <- igraph::make_ego_graph(g, order = 1, nodes = i, mode = "all")[[1]]
-    cores <- igraph::coreness(nborhood, mode = "all")
-    max_core <- igraph::induced_subgraph(nborhood, which(cores == max(cores)))
-    w[i] <- edge_density_weighted(max_core, weight = weight)
-  }
-  return(w)
 }
 
 
@@ -570,54 +642,20 @@ melt_graph <- function(g, agg_fun = NULL, directed) {
 #' @details
 #' This is a simple grid search for the restart probability parameter in RWR. For a grid of restart probability values, `RWR()` is run, raw scores are shifted by the current filtering rate of that iteration, then `solve_MWCS()` is run to find optimal subnetworks, which are scored. The restart probability resulting in the largest subnetwork score is used.
 #'
-#' @param ig Input graph
-#' @param ag Aggregated graph
-#' @param n.adj.M Normalized adjacency matrix
-#' @param seeds A named vector of seed values
-#' @param filtering_rate Quantile for shifting the raw RWR scores
-#' @param heterogeneous Logical. If TRUE, network is considered heterogeneous (two distinct node types, e.g., proteins and metabolites). If TRUE, _node_type_ must be included as an argument or graph vertex attribute
-#' @param multiplex Logical. If true, graph is assumed to contain multiplex components.
-#' @param net.weight A named vector, or NULL. Relative weight given to nodes of a component of graph, applied to seed vector in RWR. Only used when heterogeneous=TRUE.
-#' @param layer.weight A named list of named vectors, or NULL. Relative weight given to nodes of a layer of a component of graph, applied to seed vector in RWR. List element names correspond to multiplex components, and vector names correspond to layers within a multiplex.
-#' @param iteration Current iteration of the AMEND algorithm.
-#' @param agg.method A named list. The element 'primary' contains the name of the primary layer for a multiplex component to be used during subnetwork identification. The element 'agg.method' contains a character scalar referring to an aggregation function.
-#' @param degree.bias List or NULL. NULL (default) for no degree bias adjustment. List names should include 'component', which is a character string of length greater than or equal to 1 specifying the components or layers to which the degree bias adjustment will be applied, and 'method', which is a character string of 'BS' (bistochastic scaling), 'IN' (inflation-normalization), or 'SDS' (stationary distribution scaling).
-#' @param in.parallel Logical. Run certain computations in parallel.
-#' @param n.cores number of cores to use in parallel computations
-#' @param weights Weights to be used for weighted mean of cumulative probabilities derived from 3 centrality measures. A named numeric vector ('hc'=harmonic centrality, 'bc'=betweenness centrality, 'ccc'=core-clustering coefficient). If NULL, weights are chosen through a grid search (see `?AMEND:::network_connectivity_score`).
-#' @param net_diam_prop The proportion of a graphs diameter used to calculate the maximum path length (_net_diam_prop_ multiplied by graph diameter) to consider when calculating the betweenness. Can be used to speed up calculations. If zero or negative there is no such limit.
-#'
 #' @return a list containing an igraph object, subnetwork score, and restart value
 #'
 #' @noRd
 #'
-restart_grid_search <- function(orig_net, agg_net, network_hierarchy, norm, k, crosstalk_params, seed_weights, degree_bias, filtering_rate, agg_method = NULL, in_parallel = FALSE, n_cores, net_diam_prop, iteration = 1) {
-  # TEST
-  if(0){
-    orig_net = subg[[1]]
-    agg_net = sub_ag[[1]]
-    network_hierarchy = net_hier
-    norm = normalize
-    k = k
-    crosstalk_params = crosstalk_params
-    seed_weights = seed_weights
-    degree_bias = degree_bias
-    filtering_rate = ll
-    agg_method = agg_fun
-    in_parallel = in_parallel
-    n_cores = n_cores
-    net_diam_prop = net_diam_prop
-    iteration = iter_num
-  }
-  
+restart_grid_search <- function(orig_net, agg_net, network_hierarchy, normalize, k, crosstalk_params, seed_weights, degree_bias, filtering_rate, agg_method = NULL, in_parallel = FALSE, n_cores, net_diam_prop, iteration = 1) {
   #=== Function Settings ===#
   FILTERING_RATE_DIFF <- 0.25
+  GRID_NET_SIZE <- 30000
   #=========================#
   
   # Normalize adjacency matrix to get transition matrix
   tmat <- transition_matrix(network = orig_net,
                             network_hierarchy = network_hierarchy,
-                            norm = norm,
+                            normalize = normalize,
                             k = k,
                             crosstalk_params = crosstalk_params,
                             degree_bias = degree_bias,
@@ -627,15 +665,20 @@ restart_grid_search <- function(orig_net, agg_net, network_hierarchy, norm, k, c
   # Create seed vector
   seeds <- matrix(V(orig_net)$seeds, ncol = 1, dimnames = list(V(orig_net)$name))
   
-  
   if(!is.null(agg_method)) {
     agg_fun <- get_aggregate_method(agg_method)
     agg_flag <- TRUE
   } else agg_flag <- FALSE
   
   if(iteration == 1) {
-    grid <- seq(0.5, 0.95, by = 0.05)
-  } else grid <- seq(0.1, 0.95, by = 0.05)
+    if(igraph::vcount(agg_net) > GRID_NET_SIZE) {
+      grid <- seq(0.5, 0.95, by = 0.1)
+    } else grid <- seq(0.5, 0.95, by = 0.05)
+  } else {
+    if(igraph::vcount(agg_net) > GRID_NET_SIZE) {
+      grid <- seq(0.1, 0.95, by = 0.1)
+    } else grid <- seq(0.1, 0.95, by = 0.05)
+  }
   
   ncs <- node_connectivity_score(graph = orig_net, net_diam_prop = net_diam_prop, inverse = TRUE, mode = "core")
   
@@ -645,7 +688,9 @@ restart_grid_search <- function(orig_net, agg_net, network_hierarchy, norm, k, c
     rm_id <- NULL
     for(i in seq_along(grid)) {
       # RWR
-      rwr_score <- RWR(tmat = tmat, seeds = seeds, restart = grid[i], seed_weights = seed_weights, network_hierarchy = network_hierarchy, node_connectivity_scores = ncs)
+      rwr_score <- RWR(tmat = tmat, seeds = seeds, restart = grid[i], seed_weights = seed_weights, 
+                       network_hierarchy = network_hierarchy, node_specific_restart = TRUE, node_connectivity_scores = ncs)
+      rwr_score <- rwr_score[,1]
       names(rwr_score) <- V(orig_net)$name
       
       # Aggregate RWR scores
@@ -673,13 +718,16 @@ restart_grid_search <- function(orig_net, agg_net, network_hierarchy, norm, k, c
     }
   }
   if(in_parallel) {
+    `%dopar%` <- get("%dopar%", asNamespace("foreach"))
     if(is.null(n_cores)) n_cores <- round(parallel::detectCores() * 0.66)
     cl <- parallel::makeForkCluster(n_cores, outfile = "")
     on.exit(parallel::stopCluster(cl))
     if(!foreach::getDoParRegistered()) doParallel::registerDoParallel(cl)
     res <- foreach::foreach(i = seq_along(grid), .verbose = FALSE, .packages = c("igraph", "Matrix"), .export = NULL, .noexport = NULL) %dopar% {
       # RWR
-      rwr_score <- RWR(tmat = tmat, seeds = seeds, restart = grid[i], seed_weights = seed_weights, network_hierarchy = network_hierarchy, node_connectivity_scores = ncs)
+      rwr_score <- RWR(tmat = tmat, seeds = seeds, restart = grid[i], seed_weights = seed_weights, 
+                       network_hierarchy = network_hierarchy, node_specific_restart = TRUE, node_connectivity_scores = ncs)
+      rwr_score <- rwr_score[,1]
       names(rwr_score) <- V(orig_net)$name
       
       # Aggregate RWR scores
@@ -747,18 +795,14 @@ restart_grid_search <- function(orig_net, agg_net, network_hierarchy, norm, k, c
 #'
 #' @param graphs A list of subgraphs coming from a common parent graph
 #' @param net_diam_prop The proportion of a graphs diameter used to calculate the maximum path length (_net_diam_prop_ multiplied by graph diameter) to consider when calculating the betweenness. Can be used to speed up calculations. If zero or negative there is no such limit.
-#' @param in_parallel
-#' @param n_cores
+#' @param in_parallel Logical. Whether to run certain operations in parallel, using the _parallel_, _doParallel_ and _foreach_ packages.
+#' @param n_cores Numeric scalar or NULL (default). Number of cores to use during parallel processing. When NULL and in_parallel=TRUE, defaults to two-thirds the number of cores detected on machine.
 #' 
 #' @returns numeric vector of aggregated connectivity scores
 #' 
 #' @noRd
 #'
 network_connectivity_score = function(graphs, net_diam_prop = -1, in_parallel = FALSE, n_cores = NULL){
-  if(0){
-    i = c(8,13,17,20,22,23)[1]
-    graphs = nets; weights = weights[[i]]; net_diam_prop = -1; avg.seed.val = rep(1, nrow(score_metrics)); in.parallel = TRUE; n.cores = NULL
-  }
   ## Input checks
   # graphs
   if(length(graphs) == 0) {
@@ -770,6 +814,7 @@ network_connectivity_score = function(graphs, net_diam_prop = -1, in_parallel = 
   
   # Calculating centrality measures
   if(in_parallel) {
+    `%dopar%` <- get("%dopar%", asNamespace("foreach"))
     if(is.null(n_cores)) n_cores <- round(parallel::detectCores() * 0.66)
     cl <- parallel::makeForkCluster(n_cores, outfile = "")
     on.exit(parallel::stopCluster(cl))
@@ -822,54 +867,6 @@ network_connectivity_score = function(graphs, net_diam_prop = -1, in_parallel = 
     tmp_agg_cent <- apply(tmp, 1, max)
     agg_cent[i] <- mean(tmp_agg_cent)
   }
-  
-  return(agg_cent)
-}
-
-
-#' @title 
-#'
-#' @description
-#' 
-#' @param 
-#' @param 
-#'
-#' @return 
-#' 
-#' @noRd
-#'
-node_connectivity_score <- function(graph, net_diam_prop = -1, inverse = FALSE, mode = c("core", "mix")) {
-  
-  mode <- match.arg(mode)
-  
-  # net_diam_prop
-  if(net_diam_prop > 1) stop("'net_diam_prop' must be negative or between 0 and 1.")
-  
-  # Centrality measures
-  if(net_diam_prop < 0) {
-    kpath <- net_diam_prop
-  } else {
-    kpath <- net_diam_prop * igraph::diameter(graph = graph, directed = TRUE)
-  }
-  
-  if(mode == "mix") {
-    c_val <- data.frame(ccc = core_cc(graph, weight = TRUE),
-                        bc = igraph::betweenness(graph = graph, directed = TRUE, normalized = TRUE, cutoff = kpath),
-                        hc = igraph::harmonic_centrality(graph = graph, mode = 'out', normalized = TRUE, cutoff = kpath),
-                        row.names = V(graph)$name)
-  } else if(mode == "core") {
-    c_val <- data.frame(core = igraph::coreness(graph = graph, mode = "all"),
-                        row.names = V(graph)$name)
-  }
-  
-  
-  # Calculate eCDF & Calculate empirical cumulative probabilities
-  k <- ifelse(inverse, -1, 1)
-  for(j in seq_len(ncol(c_val))) {
-    FUN <- stats::ecdf(k * c_val[,j])
-    c_val[,j] <- FUN(k * c_val[,j])
-  }
-  agg_cent <- round(apply(c_val, 1, mean), 4)
   
   return(agg_cent)
 }

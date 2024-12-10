@@ -1,2 +1,4 @@
-^NHNM\.Rproj$
+^HMNM\.Rproj$
 ^\.Rproj\.user$
+^data-raw$
+^README\.Rmd$

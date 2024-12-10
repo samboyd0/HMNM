@@ -1,0 +1,669 @@
+---
+title: "HMNM Tutorial"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{use_HMNM}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+<!---
+
+To render vignette: 
+  devtools::build_rmd("vignettes/use_HMNM_local.Rmd")
+  devtools::build_rmd("vignettes/use_HMNM.Rmd")
+
+Alternative::
+To render Vignette:
+  1) Duplicate vignette file and add '.orig' extension 
+  2) Run this code to locally knit the vignette.
+  source("/Users/samboyd/Documents/HMNM/R package/HMNM/vignettes/makeVignette-use_HMNM.R")
+PURPOSE: Vignette may take a long time to run or rely on large datasets not available on build.
+
+Resource:
+https://ropensci.org/blog/2019/12/08/precompute-vignettes/
+--->
+
+
+
+# Introduction
+
+The _HMNM_ package (Hierarchical Multilayer Network Models) provides functionality for constructing and analyzing multilayer networks. A multilayer network consists of distinct layers with nodes or edges that differ from other layers by some characteristic. Each layer is defined by categories coming from one or more factors that are organized hierarchically. This hierarchy can have an arbitrary number of levels that correspond to factors. In general, these factors can describe node/edge-types or node/edge attribute types (i.e., values attributed to nodes and edges). 
+
+Below is an example of a hierarchy of a multilayer network. There are 3 levels corresponding to the factors "Molecule Type", "Interaction Type", and "Omic Type". Level 0 serves only as a structural anchor to ensure the hierarchy remains connected. It does not represent any factor and does not need to be set by the user. The top level is level 1, which has categories with directed edges pointing to categories of level 2. The leaf categories at the bottom level (in green, level 3) are associated with individual layers of the multilayer network, with layers represented by solid black circles. The nodes and edges of each layer are defined by the combination of its ancestor categories in the hierarchy. Not shown are possible inter-layer connections. The purpose of the hierarchy is to govern how information flows during diffusion processes, namely Random Walk with Restart (RWR); information is shared more easily between layers located closer in the hierarchy. One guiding principle for hierarchy design can be to set the factors for each level such that more similar layers are closer together in the hierarchy.
+
+
+```{r intro1, echo=FALSE, out.width="100%"}
+library(HMNM)
+suppressMessages(library(igraph)) 
+knitr::include_graphics(system.file("vignettes/images/example_hierarchy_root.png", package = "HMNM"))
+# knitr::include_graphics(paste0(path_to_images, "example_hierarchy_root.png"))
+```
+
+Below is the corresponding adjacency matrix for the multilayer network described by the above hierarchy. Each colored rectangle corresponds to a category in the hierarchy and encompasses the layers it is associated with. Intra-layer adjacency matrices are given by __A__'s and inter-layer/bipartite adjacency matrices are given by __B__'s.
+
+
+```{r intro2, echo=FALSE, out.width="100%"}
+knitr::include_graphics(system.file("vignettes/images/example_adjmat.png", package = "HMNM"))
+# knitr::include_graphics(paste0(path_to_images, "example_adjmat.png"))
+```
+
+The following vignette will go over two examples: one simple and one complex. It will highlight typical steps for pre-processing inputs to _HMNM_ functions as well as key package features, such as multilayer network construction and module identification. Below are some general steps in a network analysis workflow using _HMNM_:
+
+1. Prepare network inputs.
+    a. Gather multiple network-like objects (igraph, adjacency matrix, or edgelist) into a list, representing individual layers.
+    b. Gather bipartite networks (containing inter-layer links) into a list.
+2. Prepare data inputs. 
+    a. Gather data values (e.g., from an omic experiment) for each node in the network (__data__ arg), from which seed values will be derived for RWR.
+    b. Choose appropriate transformation functions (__FUN__ arg) to apply to your data to obtain seed values. These can be layer-specific and should output non-negative values.
+    c. Choose any function arguments to supply to the transformation functions (__FUN_params__ arg). These can be layer-specific.
+    d. Choose another set of continuous values to be used in a biased random walk (__brw_attr__ arg). (Optional)
+3. For multilayer networks, set crosstalk and seed-weight parameters.
+4. Consider additional options such as layer aggregation (for module identification) and degree bias adjustment (for RWR).
+  
+# Example 1: A Single-layer Network
+
+For this example, suppose we have RNA-seq data from samples belonging to one of two groups, we've performed a differential expression analysis, and obtained p-values assessing the statistical significance of changes in gene expression between the two groups. Now, we want to integrate this experimental data with publically available data on protein-protein interactions (PPIs) in the form of a network. This example will describe possible downstream network analyses including gene ranking and active module identification.
+
+## Prepare network data
+
+First, we start with our network data. We will use physical PPIs in Homo sapiens from the [STRING](https://string-db.org/) database (v12). These data come in the form of an edgelist, which is a matrix or data.frame with the first two columns containing the adjacent nodes of each edge, with additional columns describing the confidence scores for the interactions. The combined score is used as the edge weight. Protein names are Ensembl peptide IDs.
+
+
+``` r
+# Attach necessary libraries
+library(HMNM)
+library(igraph)
+library(dplyr)
+
+# Threshold for edges weights
+edge_threshold <- 0.7
+
+# prior of 0.041 from STRING v12, for combined confidence scores
+prior <- 0.041
+
+# Load in edgelist
+ppi_el <- data.table::fread(file = paste0(path_to_network_data, "9606.protein.physical.links.full.v12.0.txt.gz"), header = TRUE, data.table = FALSE)
+ppi_el <- ppi_el %>%
+  dplyr::mutate(combined_score = get_combined_score(., evidence_channels = c('experiments', 'experiments_transferred', 
+                                                                             'database', 'database_transferred'), prior = prior)) %>%
+  dplyr::filter(combined_score >= edge_threshold) %>%
+  dplyr::mutate(protein1 = extract_string(protein1, "\\.", 2), # remove taxonomy identifier
+                protein2 = extract_string(protein2, "\\.", 2)) %>%
+  dplyr::select(protein1, protein2, combined_score) %>%
+  dplyr::distinct() %>%
+  as.matrix() 
+
+# Simulate a directed PPI network. Each edge is given twice (e.g., A,B and B,A)
+ppi_el <- ppi_el[sample(1:nrow(ppi_el), 0.4 * nrow(ppi_el)),]
+
+# Get unique node names
+uniq_names <- unique(c(ppi_el[,1], ppi_el[,2]))
+
+head(ppi_el)
+#>      protein1          protein2          combined_score
+#> [1,] "ENSP00000426909" "ENSP00000309830" "0.982"       
+#> [2,] "ENSP00000476136" "ENSP00000340823" "0.800"       
+#> [3,] "ENSP00000353408" "ENSP00000496954" "0.800"       
+#> [4,] "ENSP00000367938" "ENSP00000354499" "0.879"       
+#> [5,] "ENSP00000316598" "ENSP00000258383" "0.800"       
+#> [6,] "ENSP00000226796" "ENSP00000257829" "0.720"
+
+# Node count
+length(uniq_names)
+#> [1] 8098
+# Edge count
+nrow(ppi_el)
+#> [1] 57140
+```
+
+## Prepare experimental data
+
+Now, we must format our p-values coming from a hypothetical differential expression analysis. We will draw these values from a Uniform(0,1) distribution. Assumed here is that gene identifiers from RNA-seq data have already been mapped to Ensembl peptide IDs (e.g., with _biomaRt_ package).
+
+
+``` r
+# Simulate p-values from a Uniform distribution
+p_values <- runif(length(uniq_names))
+names(p_values) <- uniq_names
+# This vector must be named, in order to map values to nodes in the network
+```
+
+## Performing RWR
+
+After preparing our network and experimental data, we are ready to perform RWR, a network diffusion method that takes seed values (representing a prior measure of node importance) and diffuses them through the network in discrete steps until convergence. The value of each node at the end of the diffusion process represents node proximity in the network to other high scoring nodes. The restart parameter controls the extent to which seed values are smoothed over the network; set restart values closer to one for less network smoothing.
+
+The easiest way to perform RWR in _HMNM_ is with the `RWR_pipeline()` function, which has internal calls to `create_integrated_network()`, `transition_matrix()`, and `RWR()`. Since our data represent p-values, we set `FUN = "p_value"`, which applies a negative-log-transform to the data to obtain seed values. `directed = TRUE` will ensure that the network is treated as directed. `normalize = "degree"` uses a classic column-normalization (i.e., degree normalization) for transition matrix construction. The restart parameter is set to 0.75 and `output = "vector"` will return a single vector of RWR scores. The input network is disconnected. To take the largest connected component, set `lcc = TRUE`.
+
+
+``` r
+rwr_scores <- RWR_pipeline(network_layers = ppi_el,
+                           data = p_values,
+                           FUN = "p_value",
+                           directed = TRUE,
+                           normalize = "degree",
+                           restart = 0.75,
+                           output = "vector")
+#> Warning in create_integrated_network(network_layers = network_layers, bipartite_networks = bipartite_networks, : Integrated network is disconnected.
+head(rwr_scores)
+#> ENSP00000426909 ENSP00000309830 ENSP00000476136 ENSP00000340823 ENSP00000353408 ENSP00000496954 
+#>    0.0002815760    0.0001396638    0.0001497703    0.0001075183    0.0002979059    0.0001413620
+head(sort(rwr_scores, decreasing = TRUE))
+#> ENSP00000478725 ENSP00000497642 ENSP00000291582 ENSP00000349116 ENSP00000355180 ENSP00000231487 
+#>    0.0012518738    0.0009628979    0.0009246253    0.0008856055    0.0008457441    0.0008305532
+```
+
+## Active Module Identification
+
+_HMNM_ uses the AMEND algorithm (Active Module identification with Experimental data and Network Diffusion) to identify active modules. Active modules are sets of nodes in the network that are densely connected and have large experimental values ('active' in the sense that its constituent molecules actively participate in the biological process under study). See the _Appendix_ of this vignette or the [manuscript](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC10324253/) for more details on the AMEND algorithm.
+
+The `module_identification()` function implements the AMEND algorithm. An alias is `AMEND()`. There is no _restart_ argument since this is chosen at each iteration through a grid search that maximizes a subnetwork score (see _Appendix_). The _brw_attr_ argument takes either numeric values or a character vector of nodes of interest. If numeric, these are used in a biased random walk. If a character vector, numeric values are genereated as an inverse function of distance in the network from these nodes of interest (see `?transition_matrix`). Therefore, nodes that are closer to those in `nodes_of_interest` will have increased incoming transition probabilities as compared to nodes that are further away.
+
+
+``` r
+# Set nodes of interest as the top 20 scoring nodes from RWR. 
+# This will be used to artificially seed the network using a biased random walk during the AMEND algorithm.
+# Node importance will be assessed based on seed value AND proximity in the network to these nodes of interest.
+nodes_of_interest <- names(sort(rwr_scores, decreasing = TRUE))[1:20]
+
+mod <- module_identification(network_layers = ppi_el,
+                             n = 50,
+                             data = p_values,
+                             FUN = "p_value",
+                             directed = TRUE,
+                             normalize = "degree",
+                             brw_attr = nodes_of_interest,
+                             in_parallel = TRUE,
+                             verbose = TRUE)
+#> Starting filtering rate: 0.5133
+#> Iteration: 1
+#> Iteration: 2
+#> Iteration: 3
+#> Iteration: 4
+#> Iteration: 5
+#> Iteration: 6
+#> Iteration: 7
+#> Iteration: 8
+#> Iteration: 9
+#> Iteration: 10
+#> Iteration: 11
+#> Iteration: 12
+#> Iteration: 13
+#> Iteration: 14
+#> Iteration: 15
+#> *** Converged! ***
+
+print(mod$time)
+mod$module
+#> -- 
+#> + attr: name (v/c), original_name (v/c), layer (v/c), data (v/n), brw_attr (v/n), seeds (v/n), Z (v/n), agg_layer (v/c), weight (e/n)
+#> + edges from 06f6550 (vertex names):
+#>  [1] ENSP00000366557|layer1->ENSP00000419270|layer1 ENSP00000362361|layer1->ENSP00000357748|layer1 ENSP00000362361|layer1->ENSP00000478121|layer1
+#>  [4] ENSP00000362361|layer1->ENSP00000363193|layer1 ENSP00000347168|layer1->ENSP00000355780|layer1 ENSP00000347168|layer1->ENSP00000262367|layer1
+#>  [7] ENSP00000347168|layer1->ENSP00000440542|layer1 ENSP00000347168|layer1->ENSP00000319169|layer1 ENSP00000347168|layer1->ENSP00000308405|layer1
+#> [10] ENSP00000494750|layer1->ENSP00000258198|layer1 ENSP00000494750|layer1->ENSP00000387393|layer1 ENSP00000494750|layer1->ENSP00000304669|layer1
+#> [13] ENSP00000494750|layer1->ENSP00000349679|layer1 ENSP00000494750|layer1->ENSP00000411932|layer1 ENSP00000355780|layer1->ENSP00000440542|layer1
+#> [16] ENSP00000383402|layer1->ENSP00000412324|layer1 ENSP00000434466|layer1->ENSP00000339495|layer1 ENSP00000258198|layer1->ENSP00000349679|layer1
+#> [19] ENSP00000477527|layer1->ENSP00000494750|layer1 ENSP00000477527|layer1->ENSP00000367034|layer1 ENSP00000331310|layer1->ENSP00000387393|layer1
+#> [22] ENSP00000331310|layer1->ENSP00000369131|layer1 ENSP00000309116|layer1->ENSP00000215832|layer1 ENSP00000215832|layer1->ENSP00000309116|layer1
+#> + ... omitted several edges
+mod$stats
+#>    Restart parameter Network score Avg seed Z-score Avg connectivity score Node count Edge count Density Filtering rate Observed filtering rate Decay
+#> 1               0.90         0.565            0.701                  0.805       2658      11480   0.002          0.513                   0.598  0.14
+#> 2               0.90         0.936            1.207                  0.775       1311       3868   0.002          0.446                   0.507  0.14
+#> 3               0.95         1.231            1.603                  0.768        684       1556   0.003          0.384                   0.478  0.15
+#> 4               0.95         1.513            1.918                  0.789        363        712   0.005          0.331                   0.469  0.15
+#> 5               0.95         1.692            2.104                  0.804        258        450   0.007          0.282                   0.289  0.16
+#> 6               0.90         1.777            2.200                  0.808        177        285   0.009          0.235                   0.314  0.18
+#> 7               0.95         1.899            2.359                  0.805        139        209   0.011          0.197                   0.215  0.18
+#> 8               0.95         1.861            2.399                  0.776        128        181   0.011          0.161                   0.079  0.20
+#> 9               0.90         1.974            2.470                  0.799        107        143   0.013          0.132                   0.164  0.20
+#> 10              0.95         2.050            2.480                  0.827         79        106   0.017          0.111                   0.262  0.17
+#> 11              0.75         2.044            2.436                  0.839         63         81   0.021          0.094                   0.203  0.17
+#> 12              0.50         1.949            2.408                  0.809         60         75   0.021          0.072                   0.048  0.26
+#> 13              0.45         1.958            2.399                  0.816         59         73   0.021          0.048                   0.017  0.41
+#> 14              0.45         1.959            2.390                  0.819         57         70   0.022          0.034                   0.034  0.33
+```
+
+The active module can be accessed by `mod$module`. Information on the algorithm run (e.g., network statistics of intermediate subnetworks, restart probabilities used at each iteration, network scores, etc.) can be accessed through `mod$stats`.
+
+# Example 2: A Multilayer Network
+
+This example will involve a multilayer network integrated with data from a multi-tissue, multi-omic experiment. Suppose there are two groups of mice: those with a chemically-induced liver cancer and healthy controls. From each group, we take liver samples and blood samples. For the liver samples, we perform proteomic, phosphoproteomic, and metabolomic assays. For the blood samples, we perform proteomic and metabolomic assays. For each tissue and omic type, we perform differential expression analysis between cancer and healthy samples to obtain log fold changes. We will derive seed values for RWR from this experimental data.
+
+## Hierarchy design
+
+For multilayer networks, the first step is to design a hierarchy that reflects our experimental design. In our hypothetical experiment, we have several omics data from multiple molecular types coming from multiple tissues. This suggest a 3-level hierarchy with factors _Tissue_, _Molecule_, and _Data_. A natural ordering of these levels is level 1 = _Tissue_, level 2 = _Molecule_, and level 3 = _Data_. We will formalize this hierarchy by creating an edgelist (2-column matrix) that captures the relationships between the various categories coming from the different factors. The categories must have unique names, even if two categories refer to the same thing within a factor.
+
+
+```{r ml1, fig.width=10, fig.height=10, out.width="80%", out.height="80%"}
+# Network hierarchy as an edgelist
+net_hier <- matrix(c('liver', 'meta',
+                     'liver', 'prot',
+                     'meta', 'metadat',
+                     'prot', 'protdat',
+                     'prot', 'phosphdat',
+                     'blood', 'meta2',
+                     'blood', 'prot2',
+                     'meta2', 'metadat2',
+                     'prot2', 'protdat2'), ncol = 2, byrow = TRUE)
+
+net_hier <- create_network_hierarchy(el = net_hier)
+
+class(net_hier)
+
+plot(net_hier)
+```
+
+For _Tissue_, we have categories _blood_ and _liver_. For _Molecule_, we have categories _prot_, _meta_, _prot2_, and _meta2_, which refer to proteins and metabolites. _prot_ and _prot2_ both refer to proteins but have different names to reflect the fact that they come from different tissues (same for _meta_ and _meta2_). For _Data_, we have categories _protdat_, _phosphdat_, _metadat_, _protdat2_, and _metadat2_. 
+
+We now have a hierarchy that accurately reflects our experimental design. This hierarchy describes a multilayer network with 5 layers. Each layer is associated with a leaf node in the hierarchy and is defined by the combination of all its ancestor categories (except 'root'). During RWR, information (from seed values) will be shared more readily between layers that are closer together in the hierarchy. For example, the layer associated with _protdat_ has nodes that represent proteins (_prot_) with proteomic data (_protdat_) coming from liver samples (_liver_), and it will share information with the _phosphdat_ layer more easily than with the _metadat_, _metadat2_, or _protdat2_ layers (assuming there are edges connecting _protdat_ and _phosphdat_ layers).
+
+## Prepare network data
+
+For our multilayer interaction networks, we will again use physical PPIs in Homo sapiens from the [STRING](https://string-db.org/) database (v12), as well as metabolite-metabolite interactions (MMIs) from the [STITCH](http://stitch.embl.de/) database. STITCH also has protein-metabolite interactions which we will use for bipartite connections between layers. We have 5 layer in our multilayer network: 3 PPI networks and 2 MMI networks. 
+
+For any individual network input containing nodes from more than one layer, additional information must be included to be able to associate each node with a specific layer. For edgelists, this information is included in two additional columns named "layer1", which includes layer names for nodes in column 1, and "layer2", which includes layer names for nodes in column 2. The keyword `"common"` is used for certain elements of `bp_inputs`, which will connect all common nodes between the layers included in the list name (separated by "|").
+
+
+``` r
+edge_threshold <- 0.7
+
+# prior of 0.041 from STRING v12
+prior <- 0.041
+
+## Load in edgelists
+# PPI edgelist
+ppi_el <- data.table::fread(file = paste0(path_to_network_data, '9606.protein.physical.links.full.v12.0.txt.gz'), 
+                            header = TRUE, data.table = FALSE)
+ppi_el <- ppi_el %>%
+  dplyr::mutate(combined_score = get_combined_score(., evidence_channels = c('experiments', 'experiments_transferred', 
+                                                                             'database', 'database_transferred'), 
+                                                    prior = prior)) %>%
+  dplyr::filter(combined_score >= edge_threshold) %>%
+  dplyr::mutate(protein1 = extract_string(protein1, "\\.", 2), # remove taxonomy identifier
+                protein2 = extract_string(protein2, "\\.", 2)) %>%
+  dplyr::select(protein1, protein2, combined_score) %>%
+  dplyr::distinct() %>%
+  as.matrix() %>%
+  remove_duplicate_edges()
+
+# MMI edgelist
+mmi_el <- data.table::fread(file = paste0(path_to_network_data, 'chemical_chemical.links.detailed.v5.0.tsv.gz'), 
+                            header = TRUE, data.table = FALSE)
+mmi_el <- mmi_el %>%
+  dplyr::mutate(combined_score = get_combined_score(., evidence_channels = c('similarity', 'experimental', 'database'), prior = prior)) %>%
+  dplyr::filter(combined_score >= edge_threshold) %>%
+  dplyr::mutate(chemical1 = chemical1,
+                chemical2 = chemical2) %>% # remove taxonomy identifier
+  dplyr::select(chemical1, chemical2, combined_score) %>%
+  dplyr::distinct() %>%
+  as.matrix() %>%
+  remove_duplicate_edges()
+
+# Bipartite edgelist
+bp_el <- data.table::fread(file = paste0(path_to_network_data, '9606.protein_chemical.links.transfer.v5.0.tsv.gz'), 
+                           header = TRUE, data.table = FALSE)
+bp_el <- bp_el %>%
+  dplyr::mutate(combined_score = get_combined_score(., evidence_channels = c('experimental_direct', 'experimental_transferred', 
+                                                                             'prediction_direct', 'prediction_transferred', 
+                                                                             'database_direct', 'database_transferred'), 
+                                                    prior = prior)) %>%
+  dplyr::filter(combined_score >= edge_threshold) %>%
+  dplyr::mutate(chemical = chemical,
+                protein = extract_string(protein, "\\.", 2)) %>% # remove taxonomy identifier
+  dplyr::select(chemical, protein, combined_score) %>%
+  dplyr::distinct() %>%
+  as.matrix() %>%
+  remove_duplicate_edges()
+
+# Create smaller networks
+net_el <- list(ppi = ppi_el, mmi = mmi_el)
+net_el <- lapply(names(net_el), 
+                 function(x) {
+                   g <- igraph::graph_from_edgelist(el = net_el[[x]][,1:2], directed = FALSE)
+                   E(g)$weight <- as.numeric(net_el[[x]][,3])
+                   clust <- cluster_louvain(g, resolution = ifelse(x == "ppi", 0.2, 1))
+                   c_ids <- as.numeric(names(sort(table(clust$membership), decreasing = TRUE)))
+                   g <- induced_subgraph(g, which(clust$membership == c_ids[1]))
+                   x <- igraph::as_edgelist(g)
+                   cbind(x, E(g)$weight)
+                 })
+
+ppi_el <- net_el[[1]]
+mmi_el <- net_el[[2]]
+
+# Get unique node names in each network
+ppi_names <- unique(c(ppi_el[,1], ppi_el[,2]))
+mmi_names <- unique(c(mmi_el[,1], mmi_el[,2]))
+
+# Only keep relevant bipartite edges [bottleneck]
+bp_el <- bp_el[apply(bp_el, 1, function(x) all(x[1:2] %in% c(ppi_names, mmi_names))),]
+
+# Add layer information to map each node to a specific layer
+bp_el1 <- cbind(bp_el, "layer1" = "meta", "layer2" = "prot")
+bp_el2 <- cbind(bp_el, "layer1" = "meta2", "layer2" = "prot2")
+
+length(ppi_names)
+#> [1] 2813
+nrow(ppi_el)
+#> [1] 11370
+head(ppi_el)
+#>      [,1]              [,2]              [,3]   
+#> [1,] "ENSP00000001008" "ENSP00000231509" "0.887"
+#> [2,] "ENSP00000001008" "ENSP00000325120" "0.81" 
+#> [3,] "ENSP00000001008" "ENSP00000335153" "0.754"
+#> [4,] "ENSP00000231509" "ENSP00000335153" "0.983"
+#> [5,] "ENSP00000325120" "ENSP00000335153" "0.72" 
+#> [6,] "ENSP00000001008" "ENSP00000350815" "0.81"
+
+length(mmi_names)
+#> [1] 11748
+nrow(mmi_el)
+#> [1] 60561
+head(mmi_el)
+#>      [,1]           [,2]           [,3]   
+#> [1,] "CIDm00000085" "CIDm00000181" "0.9"  
+#> [2,] "CIDm00000085" "CIDm00000317" "0.9"  
+#> [3,] "CIDm00000181" "CIDm00000317" "0.996"
+#> [4,] "CIDm00000085" "CIDm00000380" "0.9"  
+#> [5,] "CIDm00000181" "CIDm00000380" "0.995"
+#> [6,] "CIDm00000317" "CIDm00000380" "0.991"
+
+nrow(bp_el)
+#> [1] 12029
+head(bp_el)
+#>      [,1]           [,2]              [,3] 
+#> [1,] "CIDm00000006" "ENSP00000215832" "0.7"
+#> [2,] "CIDm00000006" "ENSP00000225831" "0.7"
+#> [3,] "CIDm00000006" "ENSP00000263025" "0.7"
+#> [4,] "CIDm00000006" "ENSP00000263341" "0.7"
+#> [5,] "CIDm00000006" "ENSP00000306512" "0.7"
+#> [6,] "CIDm00000007" "ENSP00000335153" "0.8"
+
+layer_inputs <- list(metadat = mmi_el, 
+                     protdat = ppi_el, 
+                     phosphdat = ppi_el, 
+                     metadat2 = mmi_el, 
+                     protdat2 = ppi_el)
+bp_inputs <- list("protdat|phosphdat" = "common",
+                  "prot|meta" = bp_el1,
+                  "prot2|meta2" = bp_el2,
+                  "metadat|metadat2" = "common",
+                  "protdat|protdat2" = "common")
+```
+
+## Prepare experimental data
+
+Now we will format our experimental data for the _data_, _FUN_, and _FUN_params_ arguments in various _NHNM_ functions. First, log fold changes are simulated for each of the 5 omics assays in our hypothetical experiment. P-values will also be generated to be negatively correlated with the log fold changes, and our final data object will contain _(log fold change) * (1 - p-value)_.  These are stored in a list with 5 elements, with names corresponding to the layers. Each vector in this list is also named. Not all nodes in the network are included in this data object to reflect the likely case that an omics assay does not capture all of the molecules in a given molecular interaction network. Network nodes with no data values will be given a seed value of 0.
+
+The _FUN_ and _FUN_params_ arguments are used to transform values in _data_ to be suitable for use as seed values. Seed values must be non-negative, with at least one non-zero element. Larger seed values reflect more important nodes. Our log fold changes are centered about zero, so some transformation is necessary. `FUN = "shift_scale"` uses a keyword to access a built-in function designed specifically for data centered about zero. It first 'shifts' all data points by taking their absolute values. Then it scales values that are not in some 'direction of interest' (_DOI_), down-weighting them by some factor _w_ between 0 and 1. In our example, we are interested in molecules that were up-regulated in cancer samples compared to healthy controls. Assuming the contrast in our DGE analysis was _Cancer - Healthy_, we are then interested in features with positive log fold changes. Thus, in _FUN_params_, we set `DOI = 1`.
+
+
+``` r
+# Simulate log fold changes from normal distribution
+data <- list(protdat = rnorm(round(0.6 * length(ppi_names), 0), sd = 2),
+             phosphdat = rnorm(0.4 * length(ppi_names), sd = 2.5),
+             metadat = rnorm(0.3 * length(mmi_names), sd = 3),
+             protdat2 = rnorm(0.6 * length(ppi_names), sd = 2.3),
+             metadat2 = rnorm(0.3 * length(mmi_names), sd = 3.3))
+names(data$protdat) <- sample(ppi_names, length(data$protdat))
+names(data$phosphdat) <- sample(ppi_names, length(data$phosphdat)) 
+names(data$protdat2) <- sample(ppi_names, length(data$protdat2))
+names(data$metadat) <- sample(mmi_names, length(data$metadat))
+names(data$metadat2) <- sample(mmi_names, length(data$metadat2))
+
+# Simluate p-values and get LogFC * (1 - pvalue)
+data <- lapply(data, function(x) {
+  x * (1 - sim_pvalues(x, k = -0.6))
+})
+
+## For computing seed values
+# Take absolute value of values in data and mutliply values that have opposite sign of 'DOI' by 'w'...
+FUN <- "shift_scale"
+FUN_params <- list(protdat = list(DOI = 1, w = 0.5), # Select for up-regulated proteins in liver
+                   phosphdat = list(DOI = 1, w = 0.2), # Select for up-regulated phospho-proteins in liver
+                   metadat = list(DOI = 1, w = 0.2), # Select for up-regulated metabolites in liver
+                   protdat2 = list(DOI = 1, w = 0.4), # Select for up-regulated proteins in blood
+                   metadat2 = list(DOI = 1, w = 0.5)) # Select for up-regulated metabolites in blood
+```
+
+## Create integrated data
+
+`create_integrated_network()` is used to merge the various layers into an integrated network, while also creating seed values by applying functions in _FUN_ (with additional arguments in _FUN_params_) to the values in _data_. `lcc = TRUE` ensures that the largest connected component is returned. `in_parallel = TRUE` will compute certain processes in parallel.
+
+
+``` r
+net <- create_integrated_network(network_layers = layer_inputs,
+                                 bipartite_networks = bp_inputs,
+                                 network_hierarchy = net_hier, 
+                                 data = data,
+                                 FUN = FUN,
+                                 FUN_params = FUN_params,
+                                 directed = FALSE,
+                                 lcc = TRUE,
+                                 in_parallel = TRUE)
+
+# Inspect result
+class(net$network)
+net$network
+#> PH b6e560a UNW- 31935 208693 -- 
+#> + attr: name (v/c), original_name (v/c), layer (v/c), data (v/n), brw_attr (v/n), seeds (v/n), Z (v/n), weight (e/n)
+#> + edges from b6e560a (vertex names):
+#>  [1] CIDm00000085|metadat--CIDm00000181|metadat CIDm00000085|metadat--CIDm00000317|metadat CIDm00000085|metadat--CIDm00000380|metadat
+#>  [4] CIDm00000085|metadat--CIDm00000783|metadat CIDm00000085|metadat--CIDm00000784|metadat CIDm00000085|metadat--CIDm00000925|metadat
+#>  [7] CIDm00000085|metadat--CIDm00000928|metadat CIDm00000085|metadat--CIDm00000961|metadat CIDm00000085|metadat--CIDm00000977|metadat
+#> [10] CIDm00000085|metadat--CIDm00001033|metadat CIDm00000085|metadat--CIDm00441252|metadat CIDm00000085|metadat--CIDm03082227|metadat
+#> [13] CIDm00000085|metadat--CIDm25271602|metadat CIDm00000085|metadat--CIDm52922022|metadat CIDm00000085|metadat--CIDm00000224|metadat
+#> [16] CIDm00000085|metadat--CIDm00000238|metadat CIDm00000085|metadat--CIDm00001023|metadat CIDm00000085|metadat--CIDm00000197|metadat
+#> [19] CIDm00000085|metadat--CIDm00000222|metadat CIDm00000085|metadat--CIDm00000280|metadat CIDm00000085|metadat--CIDm00001003|metadat
+#> [22] CIDm00000085|metadat--CIDm00023925|metadat CIDm00000085|metadat--CIDm00000051|metadat CIDm00000085|metadat--CIDm00001110|metadat
+#> + ... omitted several edges
+table(V(net$network)$layer)
+#> 
+#>   metadat  metadat2 phosphdat   protdat  protdat2 
+#>     11748     11748      2813      2813      2813
+
+class(net$hierarchy)
+#> [1] "hierarchy" "igraph"
+igraph::identical_graphs(net_hier, net$hierarchy)
+#> [1] TRUE
+```
+
+## Active Module Identification
+
+The next step in our example is to perform active module identification using the AMEND algorithm, which uses a generalized version of RWR for multilayer graphs (see _Appendix_). This involves a novel approach for transition matrix and seed vector construction using two arguments described below.
+
+### Crosstalk and Seed-weight parameters
+
+Crosstalk parameters (_crosstalk_params_ arg) govern the amount of information that is shared between layers. There can be a unique value for each category in the hierarchy representing the probability of the random walker to jump from the current layer to another layer associated with a different category of the same sibling set (i.e., set of categories with a common parent). For example, if `crosstalk_params["prot"] = 0.25`, and assuming the random walker is currently located at the _protdat_ layer, then there is a probability of 0.25 that the random walker will jump from the current layer to another layer associated with a different category of the same sibling set. This sibling set consists of _prot_ and _meta_, so this 'different category' must be _meta_, and the only layer associated with this category is _metadat_. In the case of uniform crosstalk parameter values, transition probabilities will be greater between layers that lie closer together in the hierarchy, due to the nature of the transition matrix construction and how these crosstalk parameters are applied.
+
+
+``` r
+# A default value of 0.5 is given to categories not included in crosstalk_params
+crosstalk_params <- c(protdat = 0.2, phosphdat = 0.2, meta = 0.7)
+```
+
+Seed weight govern the relative weight of seed vectors associated with a layer or sets of layers. For each sibling set of categories in the hierarchy, there can be a set of seed weights (which sum to 1) that give the relative weight of the seed sets associated with each category. For example, in the code below we have `seed_weights[[1]] = c(c(protdat = 0.4, phosphdat = 0.6))`, which will multiply the seed vectors of the layers associated with _protdat_ and _phosphdat_ by 0.4 and 0.6, respectively. Use `seed_weight_sets()` to determine which set of categories in your hierarchy should be given seed weights.
+
+
+```{r ml6}
+# Determine which sets of categories in your network hierarchy should be given seed weights
+seed_weight_sets(net_hier)
+# Uniform seed weights will be given to sibling sets not included in seed_weights
+seed_weights <- list(c(protdat = 0.4, phosphdat = 0.6),
+                       c(prot = 0.75, meta = 0.25),
+                       c(prot2 = 0.75, meta2 = 0.25))
+```
+
+## Degree Bias Adjustment
+
+AMEND also has functionality for mitigating degree bias by applying a degree bias adjustment method to specific layers in the network (see `?bistochastic_scaling`). One major source of degree bias is study bias, when certain molecules are studied more often than others, translating into an artificially high degree in interaction networks compared to less well-stuidied molecules. Bistochastic scaling reduces the influence that node degree has on diffusion scores. The input for this argument will be a list of two elements: a character vector denoting the layers to which the degree bias adjustment method will be applied, and a numeric scalar between 0 and 1 denoting the strength of this adjustment (1 for maximum adjustment, 0 for no adjustment).
+
+
+``` r
+# Adjusting for degree bias in MMI network layers
+degree_bias <- degree_bias <- list(layers = c("metadat", "metadat2"), gamma = 0.2)
+```
+
+## Layer Aggregation
+
+In multilayer networks, there is the option to aggregate sets of layers after diffusion (`RWR()`) but prior to node filtering (`solve_MWCS()`). For a given set of layers, the first layer listed is designated as the 'primary' layer. All nodes and edges of the primary layer will be kept in the aggregated network. Then, moving sequentially through the remaining layers in the set, edges (along with their adjacent nodes) are added only if at least one of its adjacent nodes is not already in the aggregated layer. RWR scores of common nodes will be averaged ('method' element of list). This can be useful if certain layers only differ by their edge type (e.g., physical vs. functional interactions between proteins) and the user wants the module to only contain edges of a certain type.
+
+
+``` r
+# Possible input for 'aggregate_layers' argument
+aggregate_layers <- list(c("protdat", "phosphdat"), c("metadat", "metadat2"), method = "mean")
+
+# However, this doesn't fit our example, so we will set this to NULL, for no aggregation (default)
+aggregate_layers <- NULL
+```
+
+## Running AMEND
+
+We now run the AMEND algorithm using `AMEND()` (an alias for `module_identification()`). This will identify an active module in the input multilayer network. To speed up computation time, we set `in_parallel = TRUE`. Instead of inputing the result of `create_integrated_network()` into the _network_layers_ argument of `AMEND()` (as we did in this example), the user can simply input all of the same arguments they used for `create_integrated_network()` into `AMEND()`, since the latter makes an internal call to the former.
+
+
+``` r
+mod <- AMEND(network_layers = net$network,
+             network_hierarchy = net$hierarchy,
+             n = 50,
+             normalize = "modified_degree", # Penalize transitions to nodes as a function of node degree
+             k = 0.5, # Controls the strength of this penalization
+             degree_bias = degree_bias,
+             crosstalk_params = crosstalk_params,
+             seed_weights = seed_weights,
+             in_parallel = TRUE)
+#> *** Converged! ***
+# Equivalent
+if(0) {
+  mod <- AMEND(network_layers = layer_inputs,
+               bipartite_networks = bp_inputs,
+               network_hierarchy = net_hier, 
+               data = data,
+               FUN = FUN,
+               FUN_params = FUN_params,
+               directed = FALSE,
+               in_parallel = TRUE,
+               n = 50,
+               normalize = "modified_degree", 
+               k = 0.5, 
+               degree_bias = degree_bias,
+               crosstalk_params = crosstalk_params,
+               seed_weights = seed_weights,
+               in_parallel = TRUE)
+}
+
+# Time
+print(igraph::vcount(net$network)) # 31935
+print(mod$time) # 4.72 mins
+
+# Active module
+mod$module
+#> W- 58 93 -- 
+#> + attr: name (v/c), original_name (v/c), layer (v/c), data (v/n), brw_attr (v/n), seeds (v/n), Z (v/n), agg_layer (v/c), weight (e/n)
+#> + edges from 96ed34f (vertex names):
+#>  [1] CIDm00000783|metadat--CIDm00000961|metadat CIDm00000783|metadat--CIDm00000101|metadat CIDm00000961|metadat--CIDm00000101|metadat
+#>  [4] CIDm00000783|metadat--CIDm00134924|metadat CIDm00000961|metadat--CIDm00134924|metadat CIDm00000783|metadat--CIDm00439479|metadat
+#>  [7] CIDm00000961|metadat--CIDm00439479|metadat CIDm00000961|metadat--CIDm00188350|metadat CIDm00000783|metadat--CIDm00001106|metadat
+#> [10] CIDm00000961|metadat--CIDm00001106|metadat CIDm00000783|metadat--CIDm23724717|metadat CIDm00000961|metadat--CIDm23724717|metadat
+#> [13] CIDm00000783|metadat--CIDm00000507|metadat CIDm00000961|metadat--CIDm00000507|metadat CIDm00000783|metadat--CIDm00008947|metadat
+#> [16] CIDm00000961|metadat--CIDm00008947|metadat CIDm00000783|metadat--CIDm09904478|metadat CIDm00000961|metadat--CIDm09904478|metadat
+#> [19] CIDm00000783|metadat--CIDm25200719|metadat CIDm00000961|metadat--CIDm25200719|metadat CIDm00000783|metadat--CIDm00656475|metadat
+#> [22] CIDm00000783|metadat--CIDm24892736|metadat CIDm00000783|metadat--CIDm00001013|metadat CIDm00000961|metadat--CIDm00001013|metadat
+#> + ... omitted several edges
+table(V(mod$module)$layer)
+#> 
+#>   metadat  metadat2 phosphdat 
+#>        24        33         1
+
+# Access original names supplied by user
+head(V(mod$module)$original_name)
+#> [1] "CIDm00000783" "CIDm00000961" "CIDm00000101" "CIDm00134924" "CIDm00439479" "CIDm00188350"
+```
+
+## Investigate previous subnetworks
+
+Since the AMEND algorithm iteratively filters out nodes to arrive at a final module, there are intermediate subnetworks associated with each iteration. A subnetwork at an earlier iteration contains the subnetworks of all later iterations. This function can be used to investigate these earlier subnetworks. `mod$subnetworks` can also be used to identify when in the algorithm certain nodes were removed.
+
+
+``` r
+# Nodes in subnetwork at the end of iteration 9
+head(mod$subnetworks[[9]])
+#> [1] "CIDm00000783|metadat" "CIDm00000961|metadat" "CIDm00000197|metadat" "CIDm00001003|metadat" "CIDm09955837|metadat" "CIDm00000033|metadat"
+
+# These nodes as an igraph object
+g_tmp <- get_subnetwork(ig = net$network, amend_object = mod, k = 9)
+table(V(g_tmp)$layer)
+#> 
+#>   metadat  metadat2 phosphdat   protdat  protdat2 
+#>        54        43        21        10        35
+
+# When was protein ENSP00000383392 removed?
+protein <- "ENSP00000383392"
+
+iter_removed <- which(unlist(lapply(mod$subnetworks, function(x){
+  !protein %in% extract_string(x, "\\|", 1)
+  })))[1]
+iter_removed
+#> [1] 3
+```
+
+# Appendix
+
+## AMEND algorithm
+
+The AMEND algorithm iteratively performs Random Walk with Restart (RWR) to obtain node scores which are used to heuristically find a maximum-weight connected subnetwork. This subnetwork is input for the next iteration, and the process continues until the subnetwork size is close to the user-specified size __n__. This involves iteratively calling `RWR()` to get node scores and then passing these node scores with the current network to `solve_MWCS()` to get a subnetwork, which is input into `RWR()` for the next iteration. Please refer to the [manuscript](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC10324253/) for more details.
+
+## Random Walk with Restart for Hierarchical Multilayer Networks
+
+The `RWR()` and `AMEND()` functions use a generalized version of RWR for hierarchical multilayer networks. There are three main novelties to this approach involving transition matrix construction, seed vector construction, and a network hierarchy.
+
+For transition matrix construction, intra-layer and inter-layer adjacency matrices are first column-normalized individually. Then crosstalk parameters are applied to inter-layer adjacency matrices to control the amount of information sharing or 'crosstalk' between layers. Crosstalk parameter values represent the probability of the random walker to jump from a layer of the specified category to layers of other categories in the same sibling set of the hierarchy. The network hierarchy informs how the crosstalk parameters are applied such that it is easier for information to spread between layers that lie closer together in the hierarchy.
+
+For seed vector construction, layer-specific seed vectors are first normalized individually. Then moving upward through the hierarchy, seed vectors belonging to categories of sibling sets are multiplied by seed weights. Seed weights give the relative importance between seed sets from different layers in a multilayer network. Seed weights can be given for each set of siblings in the network hierarchy. For upper-level categories of the hierarchy, the seeds weights are applied to the layers of their downstream leaf categories. This allows fine control over the relative importance of seed values coming from different categories at all levels of the hierarchy.
+
+`RWR()` can also implement a node-specific restart parameter based on the user-defined __restart__ parameter. For each node, __restart__ is increased or decreased as an inverse function of that nodes coreness. Therefore, if a node is located in a dense region of the network (high coreness), then its __restart__ value will decrease to enable the random walker to better explore the neighborhood around this node.
+
+## Network Scoring in AMEND
+
+The AMEND algorithm uses a grid search to select the restart parameter for RWR at each iteration. For each grid value, RWR is run to get node scores, which are used to find a maximum weight connected subnetwork, which is then scored. This network score is the product of the average Z-score of seed values and the average 'connectivity measure' of the nodes in the network. 
+
+This connectivity measure is an aggregate measure of connectivity comprising the core clustering coefficient, harmonic centrality, and betweenness centrality. For a given centrality metric, the centrality values of all the nodes across all of the subnetworks resulting from the grid search are used to create an ECDF, which is then used to assign an empirical cumulative probability to each node for that centrality measure. Then, for each node, the maximum empirical cumulative probability across the three centrality metrics is taken to be that node's 'connectivity measure'.
+
+# R Session info
+
+
+``` r
+sessionInfo()
+#> R version 4.4.1 (2024-06-14)
+#> Platform: aarch64-apple-darwin20
+#> Running under: macOS Sonoma 14.5
+#> 
+#> Matrix products: default
+#> BLAS:   /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libBLAS.dylib 
+#> LAPACK: /Library/Frameworks/R.framework/Versions/4.4-arm64/Resources/lib/libRlapack.dylib;  LAPACK version 3.12.0
+#> 
+#> locale:
+#> [1] en_US.UTF-8/en_US.UTF-8/en_US.UTF-8/C/en_US.UTF-8/en_US.UTF-8
+#> 
+#> time zone: America/New_York
+#> tzcode source: internal
+#> 
+#> attached base packages:
+#> [1] stats     graphics  grDevices utils     datasets  methods   base     
+#> 
+#> other attached packages:
+#> [1] HMNM_1.0.0   dplyr_1.1.4  igraph_2.0.3
+#> 
+#> loaded via a namespace (and not attached):
+#>  [1] utf8_1.2.4        generics_0.1.3    lattice_0.22-6    digest_0.6.37     magrittr_2.0.3    evaluate_1.0.0    grid_4.4.1        iterators_1.0.14  pkgload_1.4.0    
+#> [10] fastmap_1.2.0     rprojroot_2.0.4   R.oo_1.26.0       foreach_1.5.2     doParallel_1.0.17 Matrix_1.7-0      R.utils_2.12.3    sessioninfo_1.2.2 pkgbuild_1.4.5   
+#> [19] brio_1.1.5        urlchecker_1.0.1  promises_1.3.2    purrr_1.0.2       fansi_1.0.6       codetools_0.2-20  cli_3.6.3         shiny_1.9.1       rlang_1.1.4      
+#> [28] R.methodsS3_1.8.2 ellipsis_0.3.2    remotes_2.5.0     withr_3.0.1       cachem_1.1.0      yaml_2.3.10       devtools_2.4.5    tools_4.4.1       parallel_4.4.1   
+#> [37] memoise_2.0.1     httpuv_1.6.15     vctrs_0.6.5       R6_2.5.1          mime_0.12         lifecycle_1.0.4   htmlwidgets_1.6.4 fs_1.6.4          usethis_3.1.0    
+#> [46] miniUI_0.1.1.1    desc_1.4.3        pkgconfig_2.0.3   pillar_1.9.0      later_1.4.1       data.table_1.16.0 glue_1.7.0        profvis_0.4.0     Rcpp_1.0.13      
+#> [55] xfun_0.49         tibble_3.2.1      tidyselect_1.2.1  rstudioapi_0.17.1 knitr_1.49        xtable_1.8-4      htmltools_0.5.8.1 rmarkdown_2.29    testthat_3.2.1.1 
+#> [64] compiler_4.4.1
+```
+

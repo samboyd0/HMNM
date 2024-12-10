@@ -5,47 +5,46 @@
 
 #=== IMPORTS ===#
 #' @importFrom igraph V 
-#' @importFrom foreach %dopar%
 
 
-#' @title Pipeline for processing a mono-/multi-layer network and running Random Walk with Restart (RWR)
+#' @title Pipeline for running Random Walk with Restart (RWR)
 #' 
-#' @description `RWR_pipeline()` takes as input a mono- or multi-layer network, constructs an transition matrix, and then performs RWR. Resulting node scores can be returned as a vector or as a list with elements containing scores from each layer.
+#' @description `RWR_pipeline()` takes as input a mono- or multi-layer network, constructs a transition matrix, and then performs RWR. Resulting node scores can be returned as a vector or a list with elements containing scores from each layer.
 #' 
-#' @param network_layers,bipartite_networks Single network-like object (igraph, adjacency matrix, or edgelist) or a list of these. If a list, it must be named, with names matching category names in network_hierarchy. If multiple layers are contained in a single object, the list name must include these layer names separated by "|". bipartite_networks objects should contain the mappings between different layers. Elements in bipartite_networks list can be set to "common", which will connect all common nodes between the designated layers.
-#' @param network_hierarchy A 2-column matrix representing an edgelist for the network hierarchy, where hierarchy vertices represent categories which categorize the network nodes. Or an object of class 'hierarchy' as a result from `create_network_hierarchy()`.
-#' @param data Named list of numeric vectors, or a single numeric vector, containing numeric values from which seed values for RWR will be calculated (with _FUN_ and _FUN_params_), a character string, or NULL. Names of list should match layer names. Numeric values must be named with the corresponding node name. If a string, this should be the vertex attribute name (for igraph inputs) containing the data.
-#' @param FUN Function, list of functions, or a character string denoting a default function ('binary', 'shift_scale', 'p_value', or 'exp'), to be applied to _data_ to compute seed values for RWR. Names of list must match layer names. NULL (default) applies no transformation of values in _data_. Optional function arguments given in _FUN_params_. 
-#' @param FUN_params List or list of lists, containing additional function arguments for functions given in _FUN_. NULL (default) doesn't supply any additional function arguments.
-#' @param directed Logical. Whether the input network should be treated as directed.
-#' @param brw_attr Similar format as _data_. Contains values to be used in a biased random walk. Should contain non-negative values.
-#' @param lcc Logical. Whether to take the largest connected component of the resulting network.
-#' @param normalize Adjacency matrix normalization method to construct transition matrix.
-#' @param k Penalization factor for normalize="modified_degree". Must be non-negative, with larger values resulting in a greater penalty for node degree, in an effort to mitigate degree bias.
-#' @param crosstalk_params A named numeric vector containing the crosstalk parameters for each category in network hierarchy. If NULL (default), a uniform value of 0.5 is set. Hierarchicy categories not given in _crosstalk_params_ will be given this default value of 0.5.
-#' @param degree_bias A character vector or list, or NULL (default). The character vector denotes the layers to which the degree bias mitigation method will be applied. The list must contain this character vector of layers (named 'layers') and a numeric scalar (named 'gamma') between 0 and 1 denoting the strength of degree bias mitigation. The default gamma value is 0.2.
-#' @param restart restart probability for RWR
-#' @param seed_weights A list of named numeric vectors, or NULL (default). List elements should correspond to sibling sets of categories in network hierarchy. Values in each set must sum to one. NULL gives uniform values within each sibling set.
+#' @inheritParams create_integrated_network
+#' @inheritParams RWR
+#' @inheritParams transition_matrix
+#' @param node_specific_restart Logical. Whether to use node-specific restart probabilities based around __restart__ and inversely proportional to node coreness.
 #' @param output "list" for a list of RWR scores separated by network layer. "vector" for a single vector of all RWR scores.
 #'
 #' @return a numeric vector or a list of numeric vectors
+#'
+#' @examples
+#' # Attach igraph package
+#' library(igraph)
 #' 
-#' @seealso [create_integrated_graph()], [create_network_hierarchy()], [transition_matrix()], [RWR()]
+#' # Unique node names in 'simple_network'
+#' uniq_names <- unique(c(simple_network[,1], simple_network[,2]))
+#' 
+#' # Generate random data simulating Fold Changes
+#' fold_changes <- rexp(length(uniq_names))
+#' names(fold_changes) <- uniq_names
+#' 
+#' # Run the RWR pipeline
+#' res <- RWR_pipeline(network_layers = simple_network, 
+#'                     data = fold_changes, 
+#'                     FUN = function(x) abs(log(x)),
+#'                     restart = 0.75,
+#'                     output = "vector")
+#' head(res)
+#' 
+#' 
+#' @seealso [create_integrated_network()], [create_network_hierarchy()], [transition_matrix()], [RWR()]
 #' 
 #' @export
 #' 
 RWR_pipeline <- function(network_layers, bipartite_networks = NULL, network_hierarchy = NULL, data = NULL, FUN = NULL, FUN_params = NULL, directed = FALSE, brw_attr = NULL, lcc = FALSE,
-                         normalize = c("degree", "modified_degree"), k = 0.5, crosstalk_params = NULL, degree_bias = NULL, restart = 0.5, seed_weights = NULL, output = c("list", "vector")) {
-  if(0){ # TEST
-    norm = "modified_degree"
-    k = 0.5
-    crosstalk_params = c(protdat = 0.8, phosphdat = 0.4, meta = 0.2)
-    degree_bias = list(layers = V(g$hierarchy)$name[V(g$hierarchy)$level > 0], gamma = 0.1)
-    restart = 0.5
-    seed_weights = NULL
-    output = "list"
-  }
-  
+                         normalize = c("degree", "modified_degree"), k = 0.5, crosstalk_params = NULL, degree_bias = NULL, restart = 0.5, seed_weights = NULL, node_specific_restart = FALSE, output = c("list", "vector")) {
   output <- match.arg(output)
   
   # Create integrated network
@@ -62,7 +61,7 @@ RWR_pipeline <- function(network_layers, bipartite_networks = NULL, network_hier
   # Create transition matrix
   tmat <- transition_matrix(network = g$network,
                             network_hierarchy = g$hierarchy,
-                            norm = normalize,
+                            normalize = normalize,
                             k = k,
                             crosstalk_params = crosstalk_params,
                             degree_bias = degree_bias)
@@ -70,8 +69,9 @@ RWR_pipeline <- function(network_layers, bipartite_networks = NULL, network_hier
   # Run RWR
   seed_vals <- V(g$network)$seeds
   names(seed_vals) <- V(g$network)$name
-  ncs <- node_connectivity_score(graph = g$network, inverse = TRUE)
-  r <- RWR(tmat = tmat, seeds = seed_vals, restart = restart, seed_weights = seed_weights, network_hierarchy = g$hierarchy, node_connectivity_scores = ncs)
+  ncs <- node_connectivity_score(graph = g$network, inverse = TRUE, mode = "core")
+  r <- RWR(tmat = tmat, seeds = seed_vals, restart = restart, seed_weights = seed_weights, network_hierarchy = g$hierarchy, node_specific_restart = node_specific_restart, node_connectivity_scores = ncs)
+  r <- r[,1]
   
   if(output == "list") {
     all_layers <- extract_string(names(r), "\\|", 2)
@@ -84,104 +84,76 @@ RWR_pipeline <- function(network_layers, bipartite_networks = NULL, network_hier
     }
     return(res)
   } else {
+    if(length(unique(V(g$network)$layer)) == 1) {
+      names(r) <- V(g$network)$original_name
+    }
     return(r)
   }
-}
-
-# TEST
-if(0){
-  source("/Users/samboyd/Documents/NHNM/R package/TEST/TEST_create_integrated_network.R")
-  source("/Users/samboyd/Documents/NHNM/R package/NHNM/R/create_integrated_network.R")
-  source("/Users/samboyd/Documents/NHNM/R package/NHNM/R/RandomWalk.R")
-  
-  library(igraph)
-  library(Matrix)
-  
-  r <- RWR_pipeline(network_layers = network_layers, 
-                    bipartite_networks = bipartite_networks,
-                    network_hierarchy = network_hierarchy,
-                    data = data,
-                    FUN = FUN,
-                    FUN_params = FUN_params,
-                    directed = directed,
-                    brw_attr = brw_attr,
-                    lcc = lcc,
-                    norm = "modified_degree",
-                    k = 0.5,
-                    crosstalk_params = c(protdat = 0.8, phosphdat = 0.4, meta = 0.2),
-                    degree_bias = list(layers = "prot", gamma = 0.1),
-                    restart = 0.5,
-                    seed_weights = NULL,
-                    output = "list")
-  
-  lapply(r, head)
 }
 
 
 #' @title Perform Random Walk with Restart
 #' 
 #' @description 
-#' Perform Random Walk with Restart (RWR) with a transition matrix, seed set, restart parameter, and optional seed weights.
+#' Perform Random Walk with Restart (RWR) with a transition matrix, seed set(s), restart parameter, and optional seed weights.
 #' 
 #' @details 
 #' 
-#' The seed values give the probability of the random walker to start at a node and represents the prior importance of each node. Seed weights give the relative importance between seed sets from different layers in a multilayer network.
+#' The seed values give the probability of the random walker to start at a node and represents the prior importance of each node. This can be a single set of seed values, or _k_ sets of seed values in a _N x k_ matrix (_N_=nrow(tmat)), in which case RWR scores will be obtained for all seed sets and will return a _N x k_ matrix.
 #' 
-#' By default, `RWR()` implements a node-specific restart parameter based on the user-defined _restart_ parameter. For each node _restart_ is increased or decreased as an inverse function of that nodes coreness. Therefore, if a node is located in a dense region of the network (high coreness), then its _restart_ value will decrease to enable the random walker to better explore the neighborhood around this node.
+#' Seed weights give the relative importance between seed sets from different layers in a multilayer network. Seed weights can be given for each set of siblings in the network hierarchy (i.e., categories sharing the same parent). For upper-level categories of the hierarchy, the seeds weights are applied to the layers of their downstream leaf categories. This allows fine control over the relative importance of seed values coming from different categories at all levels of the hierarchy.
 #' 
-#' @param tmat transition matrix inheriting class "dgCMatrix" from the "Matrix" package
-#' @param seeds 
-#' @param seed_weights
-#' @param restart
-#' @param network_hierarchy
-#' @param node_specific_restart
-#' @param node_connectivity_scores
-#' @param max_iters
+#' `RWR()` can implement a node-specific restart parameter based on the user-defined __restart__ parameter. For each node, __restart__ is increased or decreased as an inverse function of that nodes coreness. Therefore, if a node is located in a dense region of the network (high coreness), then its __restart__ value will decrease to enable the random walker to better explore the neighborhood around this node.
 #' 
-#' @return named numeric vector
+#' `RWR()` uses the power iteration method to calculate steady-state probability distributions.
+#' 
+#' @param tmat transition matrix inheriting class "dgCMatrix" from the "Matrix" package.
+#' @param seeds matrix, data.frame, numeric vector, or NULL (default). If NULL, uniform seed values are given to all nodes.
+#' @param seed_weights A list of named numeric vectors, or NULL (default). List elements should correspond to sibling sets of categories in network hierarchy. Values in each set must sum to one. NULL gives uniform values within each sibling set.
+#' @param restart Restart probability. Larger values give more weight to seed values in RWR.
+#' @param network_hierarchy an object of class 'hierarchy' as a result from `create_network_hierarchy()`.
+#' @param node_specific_restart Logical. Whether to use node-specific restart probabilities based around __restart__ proportional to __node_connectivity_scores__.
+#' @param node_connectivity_scores numeric vector from a call to `node_connectivity_score(..., inverse=TRUE)`
+#' @param max_iters Maximum number of iterations for RWR.
+#' 
+#' @return matrix
+#' 
+#' @seealso [node_connectivity_score()], [RWR_pipeline()], [transition_matrix()], [module_identification()]
+#' 
+#' @examples
+#' # Attach igraph package
+#' library(igraph)
+#' 
+#' # Unique node names in 'simple_network'
+#' uniq_names <- unique(c(simple_network[,1], simple_network[,2]))
+#' 
+#' # Generate random data simulating Fold Changes
+#' fold_changes <- rexp(length(uniq_names))
+#' names(fold_changes) <- uniq_names
+#' 
+#' # Create integrated network
+#' g <- create_integrated_network(network_layers = simple_network, 
+#'                                data = fold_changes, 
+#'                                FUN = function(x) abs(log(x)))
+#' 
+#' # Create transition matrix
+#' tmat <- transition_matrix(network = g$network,
+#'                           network_hierarchy = g$hierarchy,
+#'                           normalize = "modified_degree",
+#'                           k = 0.5)
+#'                           
+#' # Run RWR
+#' seed_vals <- V(g$network)$seeds
+#' names(seed_vals) <- V(g$network)$name
+#' r <- RWR(tmat = tmat, 
+#'          seeds = seed_vals, 
+#'          restart = 0.3, 
+#'          network_hierarchy = g$hierarchy, 
+#'          node_specific_restart = FALSE)
 #' 
 #' @export
 #' 
-RWR <- function(tmat, seeds = NULL, seed_weights, restart = 0.5, network_hierarchy, node_specific_restart = TRUE, node_connectivity_scores, max_iters = 100) {
-  if(0){
-    source("/Users/samboyd/Documents/NHNM/R package/TEST/TEST_create_integrated_network.R")
-    source("/Users/samboyd/Documents/NHNM/R package/NHNM/R/create_integrated_network.R")
-    source("/Users/samboyd/Documents/NHNM/R package/NHNM/R/RandomWalk.R")
-    source("/Users/samboyd/Documents/NHNM/R package/NHNM/R/AMEND.R")
-    
-    library(igraph)
-    library(Matrix)
-    
-    s.t = Sys.time()
-    g = create_integrated_network(network_layers = network_layers, 
-                                  bipartite_networks = bipartite_networks,
-                                  network_hierarchy = network_hierarchy,
-                                  data = data,
-                                  FUN = FUN,
-                                  FUN_params = FUN_params,
-                                  directed = directed,
-                                  brw_attr = brw_attr,
-                                  lcc = lcc)
-
-    tmat = transition_matrix(network = g$network,
-                             network_hierarchy = g$hierarchy,
-                             norm = "modified_degree",
-                             k = 0.5,
-                             crosstalk_params = c(protdat = 0.8, phosphdat = 0.4, meta = 0.2),
-                             degree_bias = list(layers = V(g$hierarchy)$name[V(g$hierarchy)$level > 0], gamma = 0.1))
-
-
-    seeds = NULL
-    restart = 0.05
-    seed_weights = NULL
-    network_hierarchy = g$hierarchy
-    max_iters = 100
-    node_specific_restart <- TRUE
-    
-    node_connectivity_scores = node_connectivity_score(graph = g$network, net_diam_prop = -1, inverse =TRUE)
-    
-  }
-  
+RWR <- function(tmat, seeds = NULL, seed_weights = NULL, restart = 0.5, network_hierarchy, node_specific_restart = FALSE, node_connectivity_scores, max_iters = 100) {
   #=== Function settings ===#
   DEFAULT_RESTART <- 0.5
   convergence_tol <- 1e-08
@@ -238,24 +210,22 @@ RWR <- function(tmat, seeds = NULL, seed_weights, restart = 0.5, network_hierarc
   if(is.null(seeds)) {
     seeds <- matrix(1, ncol = 1, nrow = nrow(tmat), dimnames = list(rownames(tmat)))
   } else if(is.data.frame(seeds)) {
-    seeds <- as.matrix(seeds)[,1, drop=FALSE]
+    seeds <- as.matrix(seeds)
   } else if(is.numeric(seeds)) {
     seeds <- as.matrix(seeds, ncol = 1)
-  } else if(is.matrix(seeds)) {
-    seeds <- seeds[,1, drop=FALSE]
   } else stop("Unrecognized input for 'seeds'. Must be a matrix, data.frame, numeric vector, or NULL.")
   
   if(is.null(rownames(seeds))) {
     stop("The function requires the rownames (if matrix/data.frame) or names (if numeric) of 'seeds'.")
   } 
-  if(any(is.na(rownames(data)))) {
+  if(any(is.na(rownames(seeds)))) {
     warning("seeds with NA as rownames will be removed")
     seeds <- seeds[!is.na(rownames(seeds)), , drop=FALSE]
   }
   # Add missing seeds
   if(any(!rownames(tmat) %in% rownames(seeds))) {
     new_names <- setdiff(rownames(tmat), rownames(seeds))
-    zero_seeds <- matrix(0, ncol = 1, nrow = length(new_names), dimnames = list(new_names))
+    zero_seeds <- matrix(0, ncol = ncol(seeds), nrow = length(new_names), dimnames = list(new_names))
     seeds <- rbind(seeds, zero_seeds)
   }
   # Remove seeds not in tmat
@@ -275,18 +245,19 @@ RWR <- function(tmat, seeds = NULL, seed_weights, restart = 0.5, network_hierarc
   # RWR
   #====#
   # By Iterative Matrix Multiplication
+  
   p_i <- seeds
   if(restart != 1) {
     if(node_specific_restart) {
       d0 <- node_connectivity_scores
-      l <- (sum(d0 * p_i)) / (sum(p_i ^ 2))
+      l <- (colSums(d0 * p_i)) / (colSums(p_i ^ 2))
       d <- d0 - l * p_i
       for(i in seq_len(max_iter_radj)) {
         if(all(d >= -restart) && all(d <= 1-restart)) break
         d[d < -restart] <- -restart
         d[d > 1-restart] <- 1 - restart
-        l <- (sum(d * p_i)) / (sum(p_i ^ 2))
-        d <- d - l * p_i
+        l <- (colSums(d * p_i)) / (colSums(p_i ^ 2))
+        d <- d - p_i %*% diag(l, ncol = ncol(seeds))
       }
     } else {
       d <- 0
@@ -294,133 +265,69 @@ RWR <- function(tmat, seeds = NULL, seed_weights, restart = 0.5, network_hierarc
     
     for(i in seq_len(max_iters)) {
       p_new <- (1 - restart) * tmat %*% p_i + (restart + d) * seeds
-      if(sum(abs(p_new - p_i)) < convergence_tol) break  # Convergence check
+      if(all(apply(p_new - p_i, 2, function(x) sum(abs(x)) < convergence_tol))) break # Convergence check
       p_i <- p_new
     }
     p_i[p_i < zero_tol] <- 0
-    p_i <- sum2one(p_i, mode = "dense")
-  }
-  p_i <- p_i[,1]
-  
-  if(0){ # diagnostics
-    plot(p_i0, p_i1); abline(a=0,b=1)
-    delta = ecdf(p_i1)(p_i1) - ecdf(p_i0)(p_i0)
-    cn = coreness(g$network)
-    dg = degree(g$network)
-    
-    m = c("pearson", "spearman", "kendall")[2]
-    
-    par(mfrow=c(1,1))
-    plot(cn, delta); abline(h=0)
-    hist(delta[cn < 20])
-    cor(delta, cn, method = m)
-    cor(delta, dg, method = m)
-    
-    par(mfrow=c(1,1))
-    plot(d0, d); abline(a=0,b=1)
-    summary(d)
-    
-    cor(dg, d, method = m)
-    cor(cn, d, method = m)
-    
-    cor(dg, p_i0, method = m)
-    cor(dg, p_i1, method = m)
-    cor(cn, p_i0, method = m)
-    cor(cn, p_i1, method = m)
-    
-    par(mfrow=c(1,2))
-    plot(dg, p_i0, ylim=c(0, 0.0056))
-    plot(dg, p_i1, ylim=c(0, 0.0056))
-    
-    plot(dg, p_i0, ylim=c(0, 0.001), xlim = c(0,200))
-    plot(dg, p_i1, ylim=c(0, 0.001), xlim = c(0,200))
-    
-    par(mfrow=c(1,1))
-    plot(rank(p_i0), rank(p_i1)); abline(a=0,b=1, col='red')
+    p_i <- sum2one(as.matrix(p_i), mode = "dense")
   }
   
   return(p_i)
 }
 
-if(0){ # TEST
-  source("/Users/samboyd/Documents/NHNM/R package/TEST/TEST_create_integrated_network.R")
-  source("/Users/samboyd/Documents/NHNM/R package/NHNM/R/create_integrated_network.R")
-  source("/Users/samboyd/Documents/NHNM/R package/NHNM/R/RandomWalk.R")
-  
-  library(igraph)
-  library(Matrix)
-  
-  s.t = Sys.time()
-  g = create_integrated_network(network_layers = network_layers, 
-                                bipartite_networks = bipartite_networks,
-                                network_hierarchy = network_hierarchy,
-                                data = data,
-                                FUN = FUN,
-                                FUN_params = FUN_params,
-                                directed = directed,
-                                brw_attr = brw_attr,
-                                lcc = lcc)
-  Sys.time() - s.t
-  
-  s.t = Sys.time()
-  tmat = transition_matrix(network = g$network,
-                           network_hierarchy = g$hierarchy,
-                           norm = "modified_degree",
-                           k = 0.5,
-                           crosstalk_params = c(protdat = 0.8, phosphdat = 0.4, meta = 0.2),
-                           degree_bias = list(layers = V(g$hierarchy)$name[V(g$hierarchy)$level > 0], gamma = 0.1))
-  Sys.time() - s.t
-
-  s.t = Sys.time()
-  r = RWR(tmat = tmat, seeds = NULL, restart = 0.05, seed_weights = NULL, network_hierarchy = g$hierarchy)
-  Sys.time() - s.t
-
-}
-
-
-#' @title Create a transition matrix
+#' @title Construct a transition matrix
 #' 
-#' @description Create a transition matrix
+#' @description Constructs a transition matrix from a given network and network hierarchy. There are various options for normalization methods and degree bias adjustment.
 #' 
-#' @param t t
+#' @details
+#' `transition_matrix()` first column-normalizes intra-layer and inter-layer adjacency matrices individually. Then values in __crosstalk_params__ are applied to inter-layer adjacency matrices to control the amount of information sharing or 'crosstalk' between layers.
 #' 
-#' @return t
+#' Values in __crosstalk_params__ represent the probability of the random walker to jump from a layer of the specified category to layers of other categories in the same sibling set of the hierarchy. The network hierarchy is used such that it is easier for information to spread between layers that lie closer together in the hierarchy.
+#' 
+#' For normalize="modified_degree", the adjacency matrix is first transformed by `D^(-k) %*% A`, where `A` is an adjacency matrix, `D` is a diagonal matrix of columns sums of `A`, and `k` is a penalization factor. This transformed matrix is then column-normalized to get a transition matrix. This is equivalent to a biased random walk which penalizes transitions to nodes as a function of node degree, with penalization factor _k_ controlling the strength of this inverse relationship.
+#' 
+#' The __degree_bias__ argument can mitigate degree bias by applying a degree bias adjustment method to specific layers in the network (see [bistochastic_scaling()]).
+#' 
+#' @inheritParams create_integrated_network
+#' @param network igraph object of class 'HMNMgraph' as a result from `create_integrated_network()`.
+#' @param network_hierarchy igraph object of class 'hierarchy' as a result from `create_network_hierarchy()`.
+#' @param normalize Adjacency matrix normalization method to construct transition matrix.
+#' @param k Penalization factor for normalize="modified_degree". Must be non-negative, with larger values resulting in a greater penalty for node degree, in an effort to mitigate degree bias.
+#' @param crosstalk_params A named numeric vector containing the crosstalk parameters for each category in network hierarchy. If NULL (default), a uniform value of 0.5 is set. Hierarchicy categories not given in _crosstalk_params_ will be given this default value of 0.5.
+#' @param degree_bias A character vector or list, or NULL (default). The character vector denotes the layers to which the degree bias mitigation method will be applied. The list must contain this character vector of layers (named 'layers') and a numeric scalar (named 'gamma') between 0 and 1 denoting the strength of degree bias mitigation. The default gamma value is 0.2. Set to NULL for no degree bias adjustment.
+#' 
+#' @return sparse matrix of class dgCMatrix
+#' 
+#' @seealso [create_integrated_network()], [module_identification()]
+#' 
+#' @examples
+#' # Attach igraph package
+#' library(igraph)
+#' 
+#' # Create integrated network
+#' g <- create_integrated_network(network_layers = simple_network)
+#' 
+#' # Create transition matrix
+#' tmat <- transition_matrix(network = g$network,
+#'                           network_hierarchy = g$hierarchy,
+#'                           normalize = "modified_degree",
+#'                           k = 0.5)
 #' 
 #' @export
 #' 
-transition_matrix <- function(network, network_hierarchy, norm = c("degree", "modified_degree"), k = 0.5,
+transition_matrix <- function(network, network_hierarchy, normalize = c("degree", "modified_degree"), k = 0.5,
                               crosstalk_params = NULL, degree_bias = NULL, in_parallel = FALSE, n_cores = NULL) {
-  if(0){ # TEST
-    network = g$network
-    network_hierarchy = g$hierarchy
-    norm = "modified_degree"
-    k = 0.5
-    crosstalk_params = c(protdat = 0.8, phosphdat = 0.4, meta = 0.2)
-    degree_bias = list(layers = V(g$hierarchy)$name[V(g$hierarchy)$level > 0], gamma = 0.25)
-    in_parallel = FALSE
-    n_cores = NULL
-    #===========#
-    network = orig_net
-    network_hierarchy = network_hierarchy
-    norm = norm
-    k = k
-    crosstalk_params = crosstalk_params
-    degree_bias = degree_bias
-    in_parallel = in_parallel
-    n_cores = n_cores
-  }
-  
   #=== Function Settings ===#
   DEFAULT_CROSSTALK <- 0.5
   DEFAULT_GAMMA <- 0.2
   
-  norm <- match.arg(norm)
+  normalize <- match.arg(normalize)
   
   #=== network_hierarchy checks ===#
   if(!inherits(network_hierarchy, "hierarchy")) stop("network_hierarchy must be an object of class 'hierarchy'.")
   
   #=== network checks ===#
-  if(!inherits(network, "NHNMgraph")) stop("network must be an object of class 'NHNMgraph'.")
+  if(!inherits(network, "HMNMgraph")) stop("network must be an object of class 'HMNMgraph'.")
   
   # Convert to adjacency matrix with class dgCMatrix from Matrix package
   adj_mat <- igraph::as_adjacency_matrix(graph = network, attr = "weight", sparse = TRUE)
@@ -468,7 +375,7 @@ transition_matrix <- function(network, network_hierarchy, norm = c("degree", "mo
   
   # BOTTLENECK
   tmat <- normalize_adjmat(adj_mat = adj_mat,
-                           norm = norm,
+                           norm = normalize,
                            k = k,
                            layers = all_layers,
                            brw_attr = V(network)$brw_attr,
@@ -481,104 +388,94 @@ transition_matrix <- function(network, network_hierarchy, norm = c("degree", "mo
   return(tmat)
 }
 
-# TEST
-if(0){
-  source("/Users/samboyd/Documents/NHNM/R package/TEST/TEST_create_integrated_network.R")
-  source("/Users/samboyd/Documents/NHNM/R package/NHNM/R/create_integrated_network.R")
-  source("/Users/samboyd/Documents/NHNM/R package/NHNM/R/RandomWalk.R")
-  
-  g = create_integrated_network(network_layers = network_layers, 
-                                bipartite_networks = bipartite_networks,
-                                network_hierarchy = network_hierarchy,
-                                data = data,
-                                FUN = FUN,
-                                FUN_params = FUN_params,
-                                directed = directed,
-                                brw_attr = brw_attr,
-                                lcc = lcc)
-  net = g
-  
-  vcount(g$network)
-  s.t = Sys.time()
-  tmat = transition_matrix(network = g$network,
-                           network_hierarchy = g$hierarchy,
-                           norm = "degree",
-                           crosstalk_params = c(protdat = 0.8, phosphdat = 0.4, meta = 0.2),
-                           degree_bias = list(layers = V(g$hierarchy)$name[V(g$hierarchy)$level > 0], gamma = 0.25))
-  Sys.time() - s.t
-  
-  
-  # Investigate
-  if(0){
-    tmat[1:5, 1:5]
-    nnzero(tmat)
-    min(tmat@x)
-    summary(tmat@x)
-    d = drop0(tmat1 - tmat)
-    summary(d@x)
-    median(d@x)
-    # Intra-layer
-    leaves = V(net$hierarchy)$name[V(net$hierarchy)$level == 3]
-    median_diff = numeric(length(leaves)); names(median_diff) = leaves
-    for(i in seq_along(median_diff)) {
-      ids <- which(V(net$network)$layer %in% leaves[i])
-      tmp_mat <- tmat[ids, ids]
-      tmp_mat1 <- tmat1[ids, ids]
-      d = drop0(tmp_mat1 - tmp_mat)
-      median_diff[i] = median(d@x) 
-    }
-    median_diff
-    # Inter-layer k
-    k = 1
-    sibs <- get_siblings(net$hierarchy, level = k)
-    median_diff = NULL
-    for(i in seq_along(sibs)) {
-      if(length(sibs[[i]]) == 1) next
-      leaf_nodes <- get_leaf_nodes(net$hierarchy, node = sibs[[i]])
-      for(j in 1:(length(sibs[[i]])-1)) {
-        r_ids <- which(V(net$network)$layer %in% leaf_nodes[j])
-        for(l in (j+1):length(sibs[[i]])) {
-          c_ids <- which(V(net$network)$layer %in% leaf_nodes[l])
-          tmp_mat <- tmat[r_ids, c_ids]
-          tmp_mat1 <- tmat1[r_ids, c_ids]
-          d = drop0(tmp_mat1 - tmp_mat)
-          median_diff = c(median_diff, median(d@x))
-        }
-      }
-    }
-    median_diff
-    # The new transition matrix indeed has... 
-    # 1) larger intra-layer transition probabilities,
-    # 2) larger inter-category transition probabilities for categories closer together in hierarchy,
-    # 3) smaller inter-category transition probabilities for categories further apart in hierarchy.
-    
-  }
-  
-  
-  
-}
 
-
-#' @title Extract the diagonal elements of a matrix
+#' @title Bistochastic Scaling
 #'
-#' @description Extract the diagonal elements of a square matrix.
+#' @description 
+#' Directly modify the transition matrix to attenuate the influence of degree on diffusion scores (as evidenced by an increased entropy of stationary distribution associated with the modified transition matrix).
+#' This is done by scaling the transition matrix to be approximately bistochastic (all row & column sums equal 1).
 #'
-#' @param X dgCMatrix sparse matrix
+#' @details
+#' `bistochastic_scaling()` uses the Iterative Proportional Fitting (IPF) algorithm to scale the input matrix to have target row and column sums. The taret column sums are set to 1, while the target row sums are set to `rowsum - gamma * (rowsum - 1)`, where `rowsum` are the original row sums of __tmat__ and `gamma` is the parameter controlling the extent of adjustment. 
 #'
-#' @returns vector of diagonal elements of X.
+#' @param tmat transition matrix
+#' @param gamma factor controlling to what extent the transition matrix will be adjusted to mitigate degree influence on diffusion processes. Between 0 (no adjustment) and 1 (maximum adjustment).
+#'
+#' @returns A modified transition matrix that is approximately bistochastic
+#' 
+#' @examples
+#' # Attach igraph package
+#' library(igraph)
+#' 
+#' # Create integrated network
+#' g <- create_integrated_network(network_layers = simple_network)
+#' 
+#' # Create transition matrix
+#' tmat <- transition_matrix(network = g$network,
+#'                           network_hierarchy = g$hierarchy,
+#'                           normalize = "modified_degree",
+#'                           k = 0.5)
+#'                           
+#' tmat2 <- bistochastic_scaling(tmat = tmat, gamma = 1)
+#' mean(abs(tmat2[tmat2 != 0] - tmat[tmat != 0]))
+#' 
+#' tmat2 <- bistochastic_scaling(tmat = tmat, gamma = 0.1)
+#' mean(abs(tmat2[tmat2 != 0] - tmat[tmat != 0]))
 #'
 #' @export
 #' 
-get_diagonal <- function(X) {
-  d <- numeric(ncol(X))
-  for(i in seq_len(ncol(X))) {
-    id_tmp <- (X@p[i] + 1):X@p[i+1] # ids of X@x that are non-zero and in col i
-    row_ids <- X@i[id_tmp] + 1 # row ids of non-zero elements in col i
-    if(i %in% row_ids) { # if diagonal is non-zero
-      d[i] <- X@x[id_tmp[row_ids == i]]
-    }
+bistochastic_scaling <- function(tmat, gamma = 1) {
+  if(gamma == 0) return(tmat)
+  B <- ipf(X = tmat, gamma = gamma)
+  b <- get_diagonal(B)
+  tmp_res <- numeric(Matrix::nnzero(B))
+  for(i in seq_len(ncol(B))){
+    if(b[i] == 0) next
+    id_tmp <- (B@p[i] + 1):B@p[i+1] # ids of B@x that are non-zero and in col i
+    row_ids <- B@i[id_tmp] + 1 # row ids of non-zero elements in col i
+    diag_id <- id_tmp[row_ids == i]
+    off_id <- id_tmp[row_ids != i]
+    # Evenly distribute to neighbors of node i. Preserves column sums
+    tmp_res[diag_id] <- 0
+    tmp_res[off_id] <- B@x[off_id] + b[i] / (B@p[i+1] - B@p[i] - 1) # Denominator: number of non-zero elements in col i i.e., degree of node i. Minus 1 b/c of self-loops
   }
-  return(d)
+  B@x <- tmp_res
+  return(Matrix::drop0(B))
+}
+
+
+#' @title Possible seed_weight parameters
+#' 
+#' @description Get sets of siblings in hierarchy that can have seed weight parameters. These will be any sibling sets with two or more nodes.
+#' 
+#' @details This function may be useful to determine which sets of categories in your network hierarchy should be given seed weights for use in `RWR()`.
+#' 
+#' @param hierarchy igraph of network hierarchy
+#' 
+#' @return list. list element will be an empty list if no seed weight parameters are required.
+#' 
+#' @seealso [RWR()], [RWR_pipeline()], [module_identification()]
+#' 
+#' @examples
+#' # Attach igraph package
+#' library(igraph)
+#' 
+#' # Inspect 'multilayer_hierarchy' provided in HMNM package
+#' multilayer_hierarchy
+#' 
+#' # Create network hierarchy as an igraph object with additional class 'hierarchy'
+#' net_hier <- create_network_hierarchy(multilayer_hierarchy)
+#' 
+#' # Get the sibling sets of hierarchy
+#' seed_weight_sets(net_hier)
+#' 
+#' @export
+#' 
+seed_weight_sets <- function(hierarchy) {
+  sibs <- get_siblings(hierarchy)
+  res <- lapply(sibs, function(x) x[sapply(x, length) > 1] )
+  res <- unlist(res, recursive = FALSE)
+  return(res)
 }
 
 
@@ -587,7 +484,7 @@ get_diagonal <- function(X) {
 #' @description Scales input matrix X to have row and column sums approximately equal to 1, thereby transforming X to a bistochastic (doubly stochastic) matrix.
 #'
 #' @param X Matrix
-#' @param gamma
+#' @param gamma factor controlling to what extent the transition matrix will be adjusted to mitigate degree influence on diffusion processes. Between 0 (no adjustment) and 1 (maximum adjustment).
 #' @param diag_weight Edge weight to add to zero-value diagonal elements of X to aid on convergence
 #'
 #' @returns A named list
@@ -643,62 +540,26 @@ ipf <- function(X, gamma = 1, diag_weight = 1e-8) {
 }
 
 
-#' @title Bistochastic Scaling
+#' @title Extract the diagonal elements of a matrix
 #'
-#' @description 
-#' Directly modify the transition matrix to attenuate the influence of degree on diffusion scores (as evidenced by an increased entropy of stationary distribution associated with the modified transition matrix).
-#' This is done by scaling the transition matrix to be approximately bistochastic (all row & column sums equal 1).
+#' @description Extract the diagonal elements of a square matrix.
 #'
-#' @param tmat transition matrix
-#' @param gamma 
+#' @param X dgCMatrix sparse matrix
 #'
-#' @returns A modified transition matrix that is approximately bistochastic
+#' @returns vector of diagonal elements of X.
 #'
-#' @export
+#' @noRd
 #' 
-bistochastic_scaling <- function(tmat, gamma = 1) {
-  if(gamma == 0) return(tmat)
-  B <- ipf(X = tmat, gamma = gamma)
-  b <- get_diagonal(B)
-  tmp_res <- numeric(Matrix::nnzero(B))
-  for(i in seq_len(ncol(B))){
-    if(b[i] == 0) next
-    id_tmp <- (B@p[i] + 1):B@p[i+1] # ids of B@x that are non-zero and in col i
-    row_ids <- B@i[id_tmp] + 1 # row ids of non-zero elements in col i
-    diag_id <- id_tmp[row_ids == i]
-    off_id <- id_tmp[row_ids != i]
-    # Evenly distribute to neighbors of node i. Preserves column sums
-    tmp_res[diag_id] <- 0
-    tmp_res[off_id] <- B@x[off_id] + b[i] / (B@p[i+1] - B@p[i] - 1) # Denominator: number of non-zero elements in col i i.e., degree of node i. Minus 1 b/c of self-loops
+get_diagonal <- function(X) {
+  d <- numeric(ncol(X))
+  for(i in seq_len(ncol(X))) {
+    id_tmp <- (X@p[i] + 1):X@p[i+1] # ids of X@x that are non-zero and in col i
+    row_ids <- X@i[id_tmp] + 1 # row ids of non-zero elements in col i
+    if(i %in% row_ids) { # if diagonal is non-zero
+      d[i] <- X@x[id_tmp[row_ids == i]]
+    }
   }
-  B@x <- tmp_res
-  return(Matrix::drop0(B))
-}
-
-# TEST
-if(0){
-  res = bistochastic_scaling(tmat, 1)
-  res[1:5,1:5]
-  mean(abs(res[res != 0] - tmat[tmat != 0]))
-  
-  res = bistochastic_scaling(tmat, 0.9)
-  res[1:5,1:5]
-  mean(abs(res[res != 0] - tmat[tmat != 0]))
-  
-  res = bistochastic_scaling(tmat, 0.8)
-  res[1:5,1:5]
-  mean(abs(res[res != 0] - tmat[tmat != 0]))
-  
-  res = bistochastic_scaling(tmat, 0.25)
-  res[1:5,1:5]
-  mean(abs(res[res != 0] - tmat[tmat != 0]))
-  
-  res = bistochastic_scaling(tmat, 0.1)
-  res[1:5,1:5]
-  mean(abs(res[res != 0] - tmat[tmat != 0]))
-  
-  tmat[1:5,1:5]
-  
+  return(d)
 }
 
 
@@ -712,7 +573,7 @@ if(0){
 #'
 #' @returns A matrix, with all columns summing to one.
 #'
-#' @export
+#' @noRd
 #'
 sum2one <- function(X, mode = "sparse", tol = 1e-12) {
   if(mode == "sparse") {
@@ -723,45 +584,9 @@ sum2one <- function(X, mode = "sparse", tol = 1e-12) {
     X@x[abs(X@x) < tol] <- 0
     return(Matrix::drop0(X))
   } else if(mode == "dense") {
-    if(ncol(X) == 1) {
-      X <- X / colSums(X)
-    } else X <- X / rep(colSums(X), each = nrow(X))
+    X <- X / rep(colSums(X), each = nrow(X))
     return(X)
   }else stop("Unrecognized string for 'mode'.")
-}
-
-# TEST
-if(0){
-  M=100000000
-  X=matrix(rexp(M),ncol=1)
-  time=matrix(nrow=10,ncol=2)
-  for(i in seq_len(nrow(time))){
-    s.t = Sys.time()
-    x = sum2one(X,mode="dense")
-    time[i,1] = Sys.time() - s.t
-    s.t = Sys.time()
-    x = sum2one(X[,1],mode="vector")
-    time[i,2] = Sys.time() - s.t
-  }
-  apply(time, 2, summary)
-}
-
-
-#' @title Required seed_weight parameters
-#' 
-#' @description Get sets of siblings in hierarchy for which seed weight parameters are necessary. These will be any sibling sets with two or more nodes.
-#' 
-#' @param hierarchy igraph of network hierarchy
-#' 
-#' @return list. list element will be an empty list if no seed weight parameters are required.
-#' 
-#' @export
-#' 
-seed_weight_sets <- function(hierarchy) {
-  sibs <- get_siblings(hierarchy)
-  res <- lapply(sibs, function(x) x[sapply(x, length) > 1] )
-  res <- unlist(res, recursive = FALSE)
-  return(res)
 }
 
 
@@ -773,34 +598,12 @@ seed_weight_sets <- function(hierarchy) {
 #'
 #' @param adj_mat an adjacency matrix. Should of class dgCMatrix.
 #' @param layers vector of all layer names in same order as rows of adj_mat.
-#' @param network_hierarchy 
-#' @param crosstalk_params
-#' @param level
-#' @param degree_bias
-#' @param in_parallel
-#' @param n_cores
 #'
 #' @returns A column-normalized matrix containing pairwise transition probabilities
 #' 
 #' @noRd
 #'
 normalize_adjmat <- function(adj_mat, norm, k, layers, brw_attr, network_hierarchy, crosstalk_params, level = 1, degree_bias, ...) {
-  if(0){ # TEST
-    layers = all_layers
-    brw_attr = V(network)$brw_attr
-    #==============#
-    adj_mat = adj_mat
-    norm = norm
-    k = k
-    layers = all_layers
-    brw_attr = V(network)$brw_attr
-    network_hierarchy = network_hierarchy
-    crosstalk_params = crosstalk_params
-    degree_bias = degree_bias
-    in_parallel = in_parallel
-    n_cores = n_cores
-  }
-  
   if(level == max(V(network_hierarchy)$level)) { 
     #=== BASE CASE ===#
     # For each sibling set at bottom level:
@@ -864,7 +667,7 @@ normalize_adjmat <- function(adj_mat, norm, k, layers, brw_attr, network_hierarc
   }
   
   #=== RECURSIVE CASE ===#
-  adj_mat <- normalize_adjmat(adj_mat = adj_mat, norm = norm, k = k, layers = layers, brw_attr = brw_attr, network_hierarchy = network_hierarchy, crosstalk_params = crosstalk_params, level = level + 1, degree_bias = degree_bias, in_parallel = in_parallel, n_cores = n_cores)
+  adj_mat <- normalize_adjmat(adj_mat = adj_mat, norm = norm, k = k, layers = layers, brw_attr = brw_attr, network_hierarchy = network_hierarchy, crosstalk_params = crosstalk_params, level = level + 1, degree_bias = degree_bias, ...)
   
   # For each sibling set at current level:
   #   normalize inter-unit sections of norm_adj_mat
@@ -931,20 +734,12 @@ normalize_adjmat <- function(adj_mat, norm, k, layers, brw_attr, network_hierarc
 #'
 #' @param seeds an adjacency matrix. Should of class dgCMatrix.
 #' @param layers vector of all layer names in same order as rows of adj_mat.
-#' @param network_hierarchy 
-#' @param seed_weights
-#' @param level
 #'
 #' @returns A named numeric vector containing initial probabilities for RWR
 #' 
 #' @noRd
 #'
 normalize_seeds <- function(seeds, layers, network_hierarchy, seed_weights, level = 1) {
-  if(0){ # TEST
-    layers = extract_string(rownames(seeds), "\\|", 2)
-    
-  }
-  
   if(level == max(V(network_hierarchy)$level)) { 
     #=== BASE CASE ===#
     # For each sibling set at bottom level:
@@ -991,16 +786,7 @@ normalize_seeds <- function(seeds, layers, network_hierarchy, seed_weights, leve
 }
 
 
-#' @title 
-#' 
-#' @description 
-#' 
-#' @param 
-#' 
-#' @return 
-#' 
-#' @noRd
-#'
+# Get the parents of categories (h_nodes) in a network hierarchy (g)
 get_parents <- function(g, h_nodes) {
   # For given hierarchical nodes, find parents
   uniq_h_nodes <- unique(h_nodes)
@@ -1010,24 +796,8 @@ get_parents <- function(g, h_nodes) {
   return(h_node_parents)
 }
 
-# TEST
-if(0){ 
-  table(get_parents(net$hierarchy, V(net$network)$layer))
-  table(get_parents(net$hierarchy, get_parents(net$hierarchy, V(net$network)$layer)))
-  table(get_parents(net$hierarchy, get_parents(net$hierarchy, get_parents(net$hierarchy, V(net$network)$layer))))
-}
 
-
-#' @title 
-#' 
-#' @description 
-#' 
-#' @param 
-#' 
-#' @return 
-#' 
-#' @noRd
-#'
+# Get all descendants, including the queried items, between categories (h_nodes) and leaf nodes (leaves) in a network hierarchy (g).
 get_descendants <- function(g, h_nodes, leaves) {
   comb <- paste(h_nodes, leaves, sep = "|")
   uniq_comb <- unique(comb)
@@ -1041,16 +811,6 @@ get_descendants <- function(g, h_nodes, leaves) {
   }
   res <- unname(tmp[match(comb, uniq_comb)])
   return(res)
-}
-
-# TEST
-if(0){
-  leaves = V(net$network)$layer
-  head(get_descendants(g = net$hierarchy, h_nodes = leaves, leaves = leaves))
-  layers = get_parents(net$hierarchy, leaves)
-  head(get_descendants(g = net$hierarchy, h_nodes = layers, leaves = leaves))
-  layers = get_parents(net$hierarchy, layers)
-  head(get_descendants(g = net$hierarchy, h_nodes = layers, leaves = leaves))
 }
 
 
@@ -1125,258 +885,3 @@ scale_rows <- function(adjM, x = NULL, k = NULL) {
 }
 
 
-
-#=============#
-# EXPERIMENTAL
-#=============#
-#' @title Inflation-Normalization Procedure
-#'
-#' @description Directly modify the transition matrix to attenuate the influence of degree on diffusion scores (as evidenced by an increased entropy of stationary distribution associated with the modified transition matrix).
-#' This is done by raising the values in each row of a left-stochastic transition matrix by an exponent greater than one which is a positive linear function of the stationary probability of the node associated with that row. This is followed by column normalization. This procedure displaces incoming transition probabilities to a node to the other outgoing transition probabilities of its neighbors as a function of degree.
-#'
-#' @param nadjM a column-normalized adjacency matrix (i.e., transition matrix)
-#'
-#' @returns A modified transition matrix that has been adjusted for degree bias.
-#' 
-#' @noRd
-#'
-inflate_normalize <- function(tmat) {
-  # Getting stationary distribution of tmat
-  stat_distr1 <- stationary_distr(tmat)
-  e0 <- entropy(stat_distr1)
-  # Performing Inflation-normalization on transition matrix
-  kf <- c(1, 10, seq(50, 2000, 50))
-  entropy_res <- numeric(length(kf))
-  for(j in seq_along(kf)) {
-    inflation <- 1 + kf[j] * stat_distr1
-    tmat_tmp <- methods::as(tmat, "RsparseMatrix")
-    tmp <- numeric(Matrix::nnzero(tmat_tmp))
-    for(i in which(Matrix::rowSums(tmat_tmp) != 0)) { # i corresponds to rows of tmat
-      tmp[(tmat_tmp@p[i] + 1):tmat_tmp@p[i+1]] = rep(inflation[i], tmat_tmp@p[i+1] - tmat_tmp@p[i])
-    }
-    tmat_tmp@x <- tmat_tmp@x ^ tmp
-    tmat_tmp <- methods::as(tmat_tmp, "CsparseMatrix")
-    tmat_tmp <- sum2one(tmat_tmp)
-    sd_tmp <- stationary_distr(tmat_tmp)
-    if(any(sd_tmp < 0 | sd_tmp > 1)) {
-      if(j == 1) {
-        return(tmat)
-      } else {
-        j <- j - 1
-        break
-      }
-    }
-    entropy_res[j] <- entropy(sd_tmp)
-    if(j == 1) {
-      if(entropy_res[j] < e0) {
-        return(tmat)
-      }
-    } else if(entropy_res[j] <= entropy_res[j-1]) {
-      break
-    }
-  }
-  entropy_res <- entropy_res[1:j]
-  j <- which.max(entropy_res)
-  inflation <- 1 + kf[j] * stat_distr1
-  tmat <- methods::as(tmat, "RsparseMatrix")
-  tmp <- numeric(Matrix::nnzero(tmat))
-  for(i in which(Matrix::rowSums(tmat) != 0)) { # i corresponds to rows of tmat
-    tmp[(tmat@p[i] + 1):tmat@p[i+1]] = rep(inflation[i], tmat@p[i+1] - tmat@p[i])
-  }
-  tmat@x <- tmat@x ^ tmp
-  tmat <- methods::as(tmat, "CsparseMatrix")
-  tmat <- sum2one(tmat)
-  return(tmat)
-}
-
-# TEST
-if(0) {
-  tmat_tmp = bistochastic_scaling(tmat)
-  nnzero(tmat)
-  nnzero(tmat_tmp)
-  
-  tmat_tmp = inflate_normalize(tmat)
-  nnzero(tmat)
-  nnzero(tmat_tmp)
-}
-
-
-#' @title Compute entropy of a discrete probability distribution
-#'
-#' @description
-#' Computes entropy (with natural log) of a discrete probability distribution vector (i.e., sums to 1, values between 0 and 1).
-#'
-#' @param x Probability vector
-#'
-#' @returns Numeric value representing entropy
-#' 
-#' @noRd
-#'
-entropy <- function(x) {
-  x <- x[x > 0]
-  -sum(x * log(x))
-}
-
-
-#' @title Compute stationary distribution of a transition matrix
-#'
-#' @description `stationary_distr()` relies on iterative matrix multiplication to compute the stationary distribution of a transition matrix. This is equivalent to the eigenvector associated with the absolute largest eigenvalue of the transition matrix (eigenvector normalized to sum to one). 
-#'
-#' @param P Left-stochastic transition matrix
-#'
-#' @returns Probability vector of the stationary distribution.
-#' 
-#' @noRd
-#'
-stationary_distr <- function(P, tol = 1e-8, max_iter = 1000) {
-  n <- nrow(P)
-  p_i <- rep(1 / n, n)  # Initial uniform distribution
-  
-  for(i in seq_len(max_iter)) {
-    p_new <- P %*% p_i  # Matrix-vector multiplication
-    if(sum(abs(p_new - p_i)) < tol) break  # Convergence check
-    p_i <- p_new
-  }
-  return(as.numeric(p_i))
-}
-
-
-#=========#
-# DETRITUS
-#=========#
-if(0){
-  normalize_adjmat <- function(adj_mat, norm, k, layers, brw_attr, network_hierarchy, crosstalk_params, level = 1, degree_bias, ...) {
-    if(0){ # TEST
-      layers = all_layers
-      brw_attr = V(network)$brw_attr
-      #==============#
-      adj_mat = adj_mat
-      norm = norm
-      k = k
-      layers = all_layers
-      brw_attr = V(network)$brw_attr
-      network_hierarchy = network_hierarchy
-      crosstalk_params = crosstalk_params
-      degree_bias = degree_bias
-      in_parallel = in_parallel
-      n_cores = n_cores
-    }
-    
-    if(level == max(V(network_hierarchy)$level)) { 
-      #=== BASE CASE ===#
-      # For each sibling set at bottom level:
-      #   normalize intra-layer adj mat
-      #   normalize inter-layer adj mat
-      #   apply crosstalk parameters to sibling sets
-      
-      sibs <- get_siblings(network_hierarchy, level)
-      
-      for(s in seq_along(sibs)) {
-        # Normalize intra-layer and inter-layer adj mat
-        for(i in seq_along(sibs[[s]])) { # Row indices
-          r_ids <- which(layers == sibs[[s]][i])
-          for(j in seq_along(sibs[[s]])) { # Column indices
-            c_ids <- which(layers == sibs[[s]][j])
-            if(norm == "degree") {
-              adj_mat[r_ids, c_ids] <- sum2one(scale_rows(adj_mat[r_ids, c_ids], x = brw_attr[r_ids]))
-            } else if(norm == "modified_degree") {
-              adj_mat[r_ids, c_ids] <- sum2one(scale_rows(adjM = adj_mat[r_ids, c_ids], x = brw_attr[r_ids], k = k))
-            } else stop("Unrecognized string for norm argument. Must be one of 'degree' or 'modified_degree'.")
-            # Apply degree bias adjustment method
-            if(!is.null(degree_bias)) {
-              if(i == j) {
-                if(sibs[[s]][i] %in% get_leaf_nodes(network_hierarchy, node = degree_bias$layers)) {
-                  adj_mat[r_ids, c_ids] <- bistochastic_scaling(adj_mat[r_ids, c_ids], gamma = degree_bias$gamma)
-                }
-              }
-            }
-          }
-        }
-        
-        if(length(sibs[[s]]) > 1) {
-          # Apply crosstalk parameters [!!!!]
-          ids <- which(layers %in% sibs[[s]])
-          tmp_mat <- adj_mat[ids, ids]
-          tmp_layers <- extract_string(rownames(tmp_mat), "\\|", 2)
-          loop_ids <- which(Matrix::colSums(tmp_mat) != 0)
-          for(i in loop_ids) {
-            x_ids <- (tmp_mat@p[i] + 1):tmp_mat@p[i+1] # IDs of @x for column i
-            current_layer <- tmp_layers[i] # layer of node associated with column i
-            other_layers <- tmp_layers[tmp_mat@i[x_ids] + 1] # Other layers that this node is connected to
-            if(all(other_layers != current_layer)) {
-              jump_prob <- 1
-            } else {
-              jump_prob <- crosstalk_params[current_layer]
-            }
-            n_interlayer_links <- sum(unique(other_layers) != current_layer)
-            if(n_interlayer_links == 0) {
-              ctp <- 1
-            } else {
-              ctp <- ifelse(other_layers == current_layer, 1 - crosstalk_params[current_layer], jump_prob / n_interlayer_links)
-            }
-            tmp_mat@x[x_ids] <- tmp_mat@x[x_ids] * ctp
-          }
-          
-          adj_mat[ids, ids] <- sum2one(tmp_mat)
-        }
-      }
-      
-      return(adj_mat)
-    }
-    
-    #=== RECURSIVE CASE ===#
-    adj_mat <- normalize_adjmat(adj_mat = adj_mat, norm = norm, k = k, layers = layers, brw_attr = brw_attr, network_hierarchy = network_hierarchy, crosstalk_params = crosstalk_params, level = level + 1, degree_bias = degree_bias, in_parallel = in_parallel, n_cores = n_cores)
-    
-    # For each sibling set at current level:
-    #   normalize inter-unit sections of norm_adj_mat
-    #   apply crosstalk parameters to sibling sets in norm_adj_mat
-    
-    sibs <- get_siblings(network_hierarchy, level)
-    
-    for(s in seq_along(sibs)) {
-      # Normalize inter-layer adj mat
-      for(i in seq_along(sibs[[s]])) { # Row indices
-        r_ids <- which(layers %in% get_leaf_nodes(network_hierarchy, node = sibs[[s]][i]))
-        for(j in seq_along(sibs[[s]])) { # Column indices
-          if(i == j) next
-          c_ids <- which(layers %in% get_leaf_nodes(network_hierarchy, node = sibs[[s]][j]))
-          if(norm == "degree") {
-            adj_mat[r_ids, c_ids] <- sum2one(scale_rows(adj_mat[r_ids, c_ids], x = brw_attr[r_ids]))
-          } else if(norm == "modified_degree") {
-            adj_mat[r_ids, c_ids] <- sum2one(scale_rows(adjM = adj_mat[r_ids, c_ids], x = brw_attr[r_ids], k = k))
-          } else stop("Unrecognized string for norm argument. Must be one of 'degree' or 'modified_degree'.")
-        }
-      }
-      
-      if(length(sibs[[s]]) > 1) {
-        # Apply crosstalk parameters [!!!!]
-        leaf_nodes <- get_leaf_nodes(network_hierarchy, node = sibs[[s]])
-        ids <- which(layers %in% leaf_nodes)
-        tmp_mat <- adj_mat[ids, ids]
-        tmp_layers <- names(leaf_nodes)[match(extract_string(rownames(tmp_mat), "\\|", 2), leaf_nodes)]
-        loop_ids <- which(Matrix::colSums(tmp_mat) != 0)
-        for(i in loop_ids) {
-          x_ids <- (tmp_mat@p[i] + 1):tmp_mat@p[i+1] # IDs of @x for column i
-          current_layer <- tmp_layers[i] # layer of node associated with column i
-          other_layers <- tmp_layers[tmp_mat@i[x_ids] + 1] # Other layers that this node is connected to
-          if(all(other_layers != current_layer)) {
-            jump_prob <- 1
-          } else {
-            jump_prob <- crosstalk_params[current_layer]
-          }
-          n_interlayer_links <- sum(unique(other_layers) != current_layer)
-          if(n_interlayer_links == 0) {
-            ctp <- 1
-          } else {
-            ctp <- ifelse(other_layers == current_layer, 1 - crosstalk_params[current_layer], jump_prob / n_interlayer_links)
-          }
-          tmp_mat@x[x_ids] <- tmp_mat@x[x_ids] * ctp
-        }
-        
-        adj_mat[ids, ids] <- sum2one(tmp_mat)
-      }
-    }
-    
-    return(adj_mat)
-  }
-}

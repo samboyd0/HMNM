@@ -1,5 +1,5 @@
 #=====#
-# NHNM
+# HMNM
 #=====#
 
 # NOTES:
@@ -15,51 +15,65 @@
 #===================================================================#
 
 #' @importFrom igraph V V<- E E<- 
-#' @importFrom foreach %dopar%
 
 
 #' @title Create an integrated network
 #' 
-#' @description Create an integrated network from either a list of network objects (igraph, adjacency matrix, or igraph) or a single network object. Multilayer networks must have the 'network_hierarchy' argument specified.
+#' @description Create an integrated network from either a list of network objects (igraph, adjacency matrix, or edgelist) or a single network object. Multilayer networks must have the __network_hierarchy__ argument specified.
 #' 
 #' @details 
 #' `create_integrated_network()` constructs a single- or multi-layer network object from one or more distinct network objects (igraph, adjacency matrix, or edgelist). For multilayer networks, a network hierarchy must be supplied. Networks can be (un)weighted and/or (un)directed.
 #' 
 #' The hierarchy can have an arbitrary number of levels, where each level is associated with a factor (e.g., tissue, molecule, data type). Each leaf in the hierarchy (i.e., category with no child categories) corresponds to a layer in the multilayer network, and the nodes in a layer are defined by the categories of its ancestors in the hierarchy.
 #' 
-#' Layers are connected with mappings given in _bipartite_networks_.
+#' Layers are connected with mappings given in __bipartite_networks__. When any input network object has nodes from more than one layer, additional information is required to associate each node in that network object with a specific layer. These requirements differ depending on the network type. For igraphs, there must be a 'layer' vertex attribute containing the layer names of each node. For adjacency matrices, there must be a 'layer' attribute in the same order as rows/columns. For edgelists, there must be two additional columns, "layer1" and "layer2", containing the layer names of nodes in column 1 and 2, respectively.
 #' 
-#' Seed values for RWR are computed from _data_, _FUN_, and _FUN_params_. Users can also supply node-wise values in _brw_attr_ for a biased random walk, where larger values will increase transition probabilities to nodes during RWR.
+#' Seed values for RWR are computed from __data__, __FUN__, and __FUN_params__. Users can also supply node-wise values in __brw_attr__ for a biased random walk, where larger values will increase transition probabilities to nodes during RWR.
 #' 
-#' @param network_layers,bipartite_networks Single network-like object (igraph, adjacency matrix, or edgelist) or a list of these. If a list, it must be named, with names matching category names in network_hierarchy. If multiple layers are contained in a single object, the list name must include these layer names separated by "|". bipartite_networks objects should contain the mappings between different layers. Elements in bipartite_networks list can be set to "common", which will connect all common nodes between the designated layers.
+#' @param network_layers,bipartite_networks Single network-like object (igraph, adjacency matrix, or edgelist) or a list of these. If a list, it must be named, with names matching category names in __network_hierarchy__. If multiple layers are contained in a single object, the list name must include these layer names separated by "|". __bipartite_networks__ should contain the mappings between different layers. Elements in __bipartite_networks__ list can be set to "common", which will connect all common nodes between the designated layers.
 #' @param network_hierarchy A 2-column matrix representing an edgelist for the network hierarchy, where hierarchy vertices represent categories which categorize the network nodes. Or an object of class 'hierarchy' as a result from `create_network_hierarchy()`.
-#' @param data Named list of numeric vectors, or a single numeric vector, containing numeric values from which seed values for RWR will be calculated (with _FUN_ and _FUN_params_), a character string, or NULL. Names of list should match layer names. Numeric values must be named with the corresponding node name. If a string, this should be the vertex attribute name (for igraph inputs) containing the data.
-#' @param FUN Function, list of functions, or a character string denoting a default function ('binary', 'shift_scale', 'p_value', or 'exp'), to be applied to _data_ to compute seed values for RWR. Names of list must match layer names. NULL (default) applies no transformation of values in _data_. Optional function arguments given in _FUN_params_. 
-#' @param FUN_params List or list of lists, containing additional function arguments for functions given in _FUN_. NULL (default) doesn't supply any additional function arguments.
+#' @param data Named list of numeric vectors, a single numeric vector, a character string, or NULL (default). Used to calculate seeds values for RWR (with __FUN__ and __FUN_params__). Names of list should match layer names. Numeric values must be named with the corresponding node name. If a string, this should be the vertex attribute name (for igraph inputs) containing the data. NULL gives uniform seed values within each layer.
+#' @param FUN Function, list of functions, or a character string denoting a default function ('binary', 'shift_scale', 'p_value', or 'exp'), to be applied to __data__ to compute seed values for RWR. Names of list must match layer names. NULL (default) applies no transformation of values in __data__. Optional function arguments given in __FUN_params__. 
+#' @param FUN_params List or list of lists, containing additional function arguments for functions given in __FUN__. NULL (default) doesn't supply any additional function arguments.
 #' @param directed Logical. Whether the input network should be treated as directed.
-#' @param brw_attr Similar format as _data_. Contains values to be used in a biased random walk. Should contain non-negative values.
+#' @param brw_attr Similar format as __data__. Contains values to be used in a biased random walk. Should contain non-negative values.
 #' @param lcc Logical. Whether to take the largest connected component of the resulting network.
 #' @param in_parallel Logical. Whether to run certain operations in parallel, using the _parallel_, _doParallel_ and _foreach_ packages.
-#' @param n_cores Numeric scalar or NULL (default). Number of cores to use during parallel processing. When NULL and in_parallel=TRUE, defaults to two-thirds the number of cores detected on machine.
+#' @param n_cores Numeric scalar or NULL (default). Number of cores to use during parallel processing. If NULL and in_parallel=TRUE, defaults to two-thirds the number of cores detected on machine.
 #' 
 #' @return A named list:
-#' * network: the integrated network of class 'igraph' and 'NHNMgraph'
+#' * network: the integrated network of class 'igraph' and 'HMNMgraph'
 #' * hierarchy: the network hierarchy of class 'igraph' and 'hierarchy'
 #' 
 #' @seealso [create_network_hierarchy()]
 #' 
 #' @examples
+#' # Attach igraph package
+#' library(igraph)
+#' 
+#' # Inspect the multilayer network objects included in the package
+#' multilayer_network # List object with 5 igraphs
+#' interlayer_links 
+#' multilayer_hierarchy # matrix representing a directed edgelist
+#' 
+#' # Inspect data to be mapped to nodes in multilayer network
+#' # Represents p-values generated from runif
+#' lapply(multilayer_data_runif, head)
+#' 
+#' # Construct an integrated multilayer network from 
+#' #   network objects ('network_layers' arg) and bipartite mappings ('bipartite_networks' arg)
+#' net <- create_integrated_network(network_layers = multilayer_network,
+#'                                  bipartite_networks = interlayer_links,
+#'                                  network_hierarchy = multilayer_hierarchy,
+#'                                  data = multilayer_data_runif,
+#'                                  FUN = "p_value")
+#' class(net$network)
+#' class(net$hierarchy)
 #' 
 #' @export
 #' 
 create_integrated_network <- function(network_layers, bipartite_networks = NULL, network_hierarchy = NULL, data = NULL, FUN = NULL, 
                                       FUN_params = NULL, directed = FALSE, brw_attr = NULL, lcc = FALSE, in_parallel = FALSE, n_cores = NULL) {
-  #====== TEST ======#
-  if(0){
-    source("/Users/samboyd/Documents/NHNM/R package/TEST/TEST_create_integrated_network.R")
-    source("/Users/samboyd/Documents/NHNM/R package/NHNM/R/create_integrated_network.R")
-  }
-  #==================#
   #== START INPUT CHECK: network_hierarchy 
   if(is.null(network_hierarchy)) {
     if(!is.null(bipartite_networks) || (is.list(network_layers) && length(network_layers) > 1 && !igraph::is_igraph(network_layers))) stop("network_hierarchy must be supplied if bipartite_networks is non-null or network_layers is a list of several network objects, i.e., if the network inputs form a multilayer network.")
@@ -81,8 +95,8 @@ create_integrated_network <- function(network_layers, bipartite_networks = NULL,
   
   
   #== START INPUT CHECK: network_layers
-  if(inherits(network_layers, "NHNMgraph")) {
-    if(any(!V(network_layers)$layer %in% V(network_hierarchy)$name)) stop("If network_layers is an NHNMgraph object, values of 'layer' vertex attribute must match names in network_hierarchy.")
+  if(inherits(network_layers, "HMNMgraph")) {
+    if(any(!V(network_layers)$layer %in% V(network_hierarchy)$name)) stop("If network_layers is an HMNMgraph object, values of 'layer' vertex attribute must match names in network_hierarchy.")
     return(list(network = network_layers, hierarchy = network_hierarchy))
   }
   
@@ -107,6 +121,7 @@ create_integrated_network <- function(network_layers, bipartite_networks = NULL,
   # Also, checking correct formatting of igraph, adj mat, and edgelist
   # Then, converting all non-igraph objects to igraphs with "layer", "name", and "original_ID" vertex attributes
   if(in_parallel) {
+    `%dopar%` <- get("%dopar%", asNamespace("foreach"))
     nl_names <- names(network_layers)
     if(is.null(n_cores)) n_cores <- round(parallel::detectCores() * 0.66)
     cl <- parallel::makeForkCluster(n_cores, outfile = "")
@@ -173,7 +188,8 @@ create_integrated_network <- function(network_layers, bipartite_networks = NULL,
                                                               obj_name = names(bipartite_networks)[i], 
                                                               obj_type = bp_types[i],
                                                               network_layers = network_layers, 
-                                                              network_hierarchy = network_hierarchy)
+                                                              network_hierarchy = network_hierarchy,
+                                                              directed = directed)
       }
     }
     # At this point, all bipartite networks are in edgelist form with a third column for weights
@@ -320,7 +336,7 @@ create_integrated_network <- function(network_layers, bipartite_networks = NULL,
     if(!brw_attr %in% igraph::vertex_attr_names(graph)) stop("For brw_attr: No vertex attribute '", brw_attr,"' found.")
     V(graph)$brw_atrr <- igraph::vertex_attr(graph, brw_attr)
   } else if(is.character(brw_attr) && length(brw_attr) > 1) {
-    graph <- set_brw_attr(graph = graph, brw_attr = brw_attr)
+    graph <- set_brw_attr(graph = graph, brw_attr = brw_attr, BRW_NOI = TRUE)
   } else if(is.null(brw_attr)) {
     V(graph)$brw_attr <- 1
   } else stop("Unrecognized brw_attr argument. Must be a named list, numeric vector, character string, or NULL.")
@@ -392,9 +408,14 @@ create_integrated_network <- function(network_layers, bipartite_networks = NULL,
       seeds_tmp <- do.call(f_tmp, c(list(V(graph)$data[ids]), fp_tmp))
       seeds_tmp[is.na(seeds_tmp)] <- 0
       
-      Z_tmp <- (seeds_tmp - mean(seeds_tmp)) / stats::sd(seeds_tmp) # Z-score
-      # Z_tmp <- (seeds_tmp - stats::median(seeds_tmp)) / stats::mad(seeds_tmp, constant = 1) # 'robust' Z-score
-      # Z_tmp <- stats::ecdf(seeds_tmp)(seeds_tmp) 
+      if(stats::sd(seeds_tmp) == 0) {
+        Z_tmp <- rep(1, length(seeds_tmp))
+      } else {
+        Z_tmp <- (seeds_tmp - mean(seeds_tmp)) / stats::sd(seeds_tmp) # Z-score
+        # Z_tmp <- (seeds_tmp - stats::median(seeds_tmp)) / stats::mad(seeds_tmp, constant = 1) # 'robust' Z-score
+        # Z_tmp <- stats::ecdf(seeds_tmp)(seeds_tmp) 
+      }
+      
       
       if(!all_good(seeds_tmp)) stop("For layer ", leaf_nodes[j],": Applying 'FUN' to 'data' to compute seed values resulted in either negative or all zero values.")
       
@@ -411,67 +432,40 @@ create_integrated_network <- function(network_layers, bipartite_networks = NULL,
   }
   
   # Assigning additional class to graph for processing in other package functions
-  class(graph) <- c("NHNMgraph", "igraph")
+  class(graph) <- c("HMNMgraph", "igraph")
   
   return(list(network = graph, hierarchy = network_hierarchy))
-}
-
-# TEST
-if(0){
-  source("/Users/samboyd/Documents/NHNM/R package/TEST/TEST_create_integrated_network.R")
-  source("/Users/samboyd/Documents/NHNM/R package/NHNM/R/create_integrated_network.R")
-  
-  s.t = Sys.time()
-  g = create_integrated_network(network_layers = network_layers, 
-                                bipartite_networks = bipartite_networks,
-                                network_hierarchy = network_hierarchy,
-                                data = data,
-                                FUN = FUN,
-                                FUN_params = FUN_params,
-                                directed = directed,
-                                brw_attr = brw_attr,
-                                lcc = lcc, 
-                                in_parallel = TRUE)
-  Sys.time() - s.t
-  
-  class(g$network)
-  class(g$hierarchy)
-  
-  summary(V(g$network)$Z)
-  # Standard Z-score
-  # Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
-  # -1.0325 -0.7060 -0.3106  0.0000  0.3703  8.1400
-  # Robust Z-score
-  # Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
-  # -1.4722 -0.8438  0.0000  0.6591  1.4458 18.0350 
- 
-  g1 = create_integrated_network(network_layers = g$network,
-                                 bipartite_networks = NULL,
-                                 network_hierarchy = network_hierarchy,
-                                 data = data,
-                                 FUN = FUN,
-                                 FUN_params = FUN_params,
-                                 directed = directed,
-                                 brw_attr = brw_attr,
-                                 lcc = lcc, 
-                                 in_parallel = TRUE)
 }
 
 
 #' @title Create a network hierarchy
 #' 
-#' @description `create_network_hierarchy()` creates an igraph object with additional class "hierarchy"
+#' @description Creates an igraph object with additional class "hierarchy" representing the network hierarchy.
 #' 
 #' @details 
-#' The network hierarchy contains levels representing factors (e.g., tissue, molecule, data type), with each factor containing categories. The leaves in the hierarchy (i.e., categories with no children categories) correspond to layers in the multilayer network. These layers are defined by the categories of its ancestors in the hierarchy.
+#' The network hierarchy contains levels representing factors (e.g., tissue, molecule, data type), with each factor containing categories (e.g., tissue=\{lung, blood\}, molecule=\{protein, metabolite\}, data type=\{proteomic, metabolomic\}). All categories must have a unique name, even if they represent the same category at the same level, but different location (e.g., 'proteomic' and 'proteomic2' when there are multiple layers with proteomic data). The leaves in the hierarchy (i.e., categories with no children categories, bottom level) correspond to layers in the multilayer network. The nodes in each layer are defined by the categories of its ancestors in the hierarchy.
 #' 
-#' The purpose of the hierarchy is to control how information is spread through the multilayer network during Random Walk with Restart (RWR). Information is more readily shared between layers located closer together in the hierarchy.
+#' The purpose of the hierarchy is to control how information is spread through the multilayer network during Random Walk with Restart (RWR). Information is more readily shared between layers located closer together in the hierarchy. It is important to carefully consider the hierarchy structure in light of the research domain or experimental design.
 #' 
 #' For a hierarchy with M levels, the top level is level 1 and the bottom level is level M.
 #' 
 #' @param el a 2-column matrix representing a directed network hierarchy (col 1 = parent, col 2 = child).
 #' 
 #' @return an igraph object with class "hierarchy"
+#' 
+#' @examples
+#' # Attach igraph package
+#' library(igraph)
+#' 
+#' # Inspect 'multilayer_hierarchy' provided in HMNM package
+#' multilayer_hierarchy
+#' 
+#' # Create network hierarchy as an igraph object with additional class 'hierarchy'
+#' net_hier <- create_network_hierarchy(multilayer_hierarchy)
+#' class(net_hier)
+#' if(interactive()) {
+#'  plot(net_hier)
+#' }
 #' 
 #' @export
 #' 
@@ -485,7 +479,22 @@ create_network_hierarchy <- function(el) {
   if(any(grepl("\\|", V(network_hierarchy)$name))) stop("Hierarchy node names cannot contain '|'. This is used as a delimiter for internal processing.")
   
   # The hierarchy network must be a tree
-  if(!igraph::is_tree(network_hierarchy, mode = "out")) stop("Network hierarchy must be a tree.\nYou may need to specify a dummy root node in your hierarchy with edges pointing to categories of the top level.")
+  if(!igraph::is_tree(network_hierarchy, mode = "out")) {
+    # Add a dummy 'root' node
+    new_root_name <- "root"
+    repeat {
+      if(!new_root_name %in% V(network_hierarchy)$name) break
+      new_root_name <- paste(new_root_name, sample(0:9,1), sep = "")
+    }
+    root_node_ids <- which(igraph::degree(graph = network_hierarchy, mode = "in") == 0)
+    root_names <- V(network_hierarchy)$name[root_node_ids]
+    add_to_el <- c(rbind(rep(new_root_name, length(root_names)), root_names))
+    el <- rbind(el, matrix(add_to_el, ncol = 2, byrow = TRUE))
+    # Convert new hierarchy matrix to igraph
+    network_hierarchy <- igraph::graph_from_edgelist(el = el, directed = TRUE)
+    
+    if(!igraph::is_tree(network_hierarchy, mode = "out")) stop("Network hierarchy must be a tree.")
+  } 
   
   root_node_id <- which(igraph::degree(graph = network_hierarchy, mode = "in") == 0)
   leaf_node_ids <- which(igraph::degree(graph = network_hierarchy, mode = "out") == 0)
@@ -507,23 +516,33 @@ create_network_hierarchy <- function(el) {
 }
 
 
-#' @title Get a default function
+#' @title Get a built-in function from keyword
 #'
 #' @description
 #' Return a default function used to compute seed values for random walk with restart.
 #'
-#' For the input _f_, NULL means no transformation is done. 'binary' assumes that data is 0 or 1 so no transformation is done. 'shift_scale' is for data types with a range centered about zero and takes two parameters: _DOI_ (direction of interest: 1 for positive, -1 for negative, and 0 for both) and _w_ (numeric value between 0 and 1). It takes the absolute values of the data and then down-weights nodes that weren't in DOI by _w_ (if _DOI_=0, _w_ is coerced to 1). 'p_value' assumes the data are p-values and calculates _-log10()_ . 'exp' exponentiates the values and has a _DOI_ arg. For _DOI_=-1,1, it is exp(_DOI_ * _logFC_). For _DOI_=0, it is exp(abs( _logFC_)).
+#' @details
+#' For the input _f_, NULL means no transformation is done. 
 #'
-#' @param f character string: 'binary', 'shift_scale', 'p_value', 'exp'. or NULL
+#' 'binary' coerces to numeric and then sets all positive values to 1, and to 0 otherwise. 
+#'
+#' 'shift_scale' is for data types with a range centered about zero and takes two parameters: _DOI_ (direction of interest: 1 for positive, -1 for negative, and 0 for both) and _w_ (numeric value between 0 and 1). It takes the absolute values of the data and then down-weights nodes that weren't in DOI by _w_ (if _DOI_=0, _w_ is coerced to 1). 
+#'
+#' 'p_value' assumes the data are p-values and calculates _-log10(x)_ . 
+#'
+#' 'exp' exponentiates the values and has a _DOI_ argument. For _DOI_=-1 or 1, it is exp(_DOI_ * _x_). For _DOI_=0, it is exp(abs( _x_)).
+#'
+#' @param f character string: 'binary', 'shift_scale', 'p_value', 'exp', or NULL
 #'
 #' @returns a function
 #'
-#' @example
-#' 
+#' @examples
+#' get_default_function("p_value")
+#' get_default_function(NULL)
 #' 
 #' @export
 #'
-get_default_function = function(f) {
+get_default_function <- function(f) {
   if(is.null(f)) {
     res <- function(x, ...) x
   } else if(f == "binary") {
@@ -691,14 +710,7 @@ process_network_layers <- function(obj, obj_name, obj_type, multi, directed, net
 #' 
 #' @noRd
 #' 
-process_bipartite_networks <- function(obj, obj_name, obj_type, network_layers, network_hierarchy) {
-  if(0){
-    i=2
-    obj = bipartite_networks[[i]]
-    obj_name = names(bipartite_networks)[i]
-    obj_type = bp_types[i]
-  }
-  
+process_bipartite_networks <- function(obj, obj_name, obj_type, network_layers, network_hierarchy, directed) {
   # Create a flag to denote if uses a keyword (e.g., "common")
   LINKING_COMMON_NODES <- obj_type == "keyword"
   
@@ -799,18 +811,6 @@ process_bipartite_networks <- function(obj, obj_name, obj_type, network_layers, 
 #' @noRd
 #' 
 connect_layers <- function(obj = NULL, bp_name, network_layers, network_hierarchy) {
-  if(0){
-    bp_name = c(obj_name, 
-                "protdat|phosphdat", 
-                "prot|prot2", 
-                "protdat|protdat2", 
-                "prot", 
-                "prot2", 
-                "meta|prot",
-                "liver" # This will have resulted in an error before this point.
-                )[1]
-  }
-  
   layer_names <- extract_string(bp_name, "\\|", 0)
   leaves <- get_leaf_nodes(network_hierarchy, node = layer_names)
   
@@ -889,11 +889,6 @@ connect_layers <- function(obj = NULL, bp_name, network_layers, network_hierarch
 #' @noRd
 #' 
 connect_common_nodes <- function(layers, network_layers, network_hierarchy) {
-  if(0){
-    layers = c("protdat", "protdat2")
-    layers = c(np[i,1], np[i,2])
-  }
-  
   layer_net <- layer_node <- vector("list", length(layers))
   for(i in seq_along(layer_net)) {
     id <- which(unlist(sapply(names(network_layers), function(x) layers[i] %in% get_leaf_nodes(network_hierarchy, node = extract_string(x, "\\|", 0)))))
@@ -936,11 +931,6 @@ connect_common_nodes <- function(layers, network_layers, network_hierarchy) {
 #' @noRd
 #' 
 apply_bp_mapping = function(layers, c1_ids, c2_ids, c1_layers, c2_layers, weights, network_layers, network_hierarchy) {
-  if(0){
-    layers = c(leaves[i], leaves[j])
-    layers = c(np[i,1], np[i,2])
-  }
-  
   # Unique nodes in each of the non-BP network objects associated with layers
   layer_node <- vector("list", length(layers)); names(layer_node) <- layers
   for(i in seq_along(layer_node)) {
@@ -1007,7 +997,7 @@ get_bp_network_type <- function(obj) {
   keywords = c("common")
   if (inherits(obj, "igraph")) {
     type <- "igraph"
-  } else if(inherits(obj, "Matrix") || is.matrix(obj)) {
+  } else if((inherits(obj, "Matrix") || is.matrix(obj)) && nrow(obj) == ncol(obj)) {
     type <- "adjmat"
   } else if((is.matrix(obj) || is.data.frame(obj)) && (ncol(obj) >= 2)) {
     type <- "edgelist"
@@ -1057,13 +1047,6 @@ get_leaf_nodes <- function(g, level = NULL, node = NULL) {
   return(res)
 }
 
-# TEST
-if(0){
-  get_leaf_nodes(network_hierarchy, level = 1)
-  get_leaf_nodes(network_hierarchy, node = 'blood')
-  get_leaf_nodes(network_hierarchy, node = c('blood', 'prot'))
-}
-
 
 #' @title Extract a substring 
 #' 
@@ -1075,7 +1058,12 @@ if(0){
 #' 
 #' @return character vector 
 #' 
-#' @noRd
+#' @examples
+#' x <- paste(letters, LETTERS, sep = "|")
+#' extract_string(x, "\\|", 2)
+#' extract_string(x, "\\|", 0)
+#' 
+#' @export
 #' 
 extract_string <- function(x, k, pos) {
   if(pos == 0) {
@@ -1156,6 +1144,4 @@ set_brw_attr <- function(graph, brw_attr, BRW_NOI) {
   } 
   return(graph)
 }
-
-
 

@@ -1,11 +1,31 @@
-Package: NHNM
-Title: What the Package Does (One Line, Title Case)
-Version: 0.0.0.9000
+Package: HMNM
+Title: Analysis of Multilayer Hierarchical Networks
+Version: 1.0.0
+Date: 2024-12-07
 Authors@R: 
-    person("First", "Last", , "first.last@example.com", role = c("aut", "cre"))
-Description: What the package does (one paragraph).
-License: `use_mit_license()`, `use_gpl3_license()` or friends to pick a
-    license
+    person(given = "Sam",
+           family = "Boyd",
+           role = c("aut", "cre"),
+           email = "samsboyd21@gmail.com",
+           comment = c(ORCID = "0000-0002-0025-7100"))
+Description: HMNM (Hierarchical Multilayer Network Models) provides functionality for 
+    constructing and analyzing multilayer networks, where layers are organized by a hierarchy 
+    of categories from different factors. Analytic capabilities include 
+    network diffusion (RWR) and module identification (AMEND).
+License: GPL (>= 2)
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
+Depends: 
+    R (>= 3.5)
+LazyData: true
+Imports: 
+    igraph,
+    Matrix
+Suggests: 
+    doParallel,
+    parallel,
+    foreach,
+    knitr,
+    rmarkdown
+VignetteBuilder: knitr

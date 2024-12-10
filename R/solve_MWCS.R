@@ -6,21 +6,25 @@
 #'
 #' @details Details are taken from the _dnet_ package documentation for the `dnetfind()` function:
 #'
-#'  i) transform the input graph into a new graph by collapsing connected positive nodes into a meta-node. As such, meta-nodes are isolated to each other but are linked via negative nodes (single-nodes). Clearly, meta-nodes have positive scores, and negative scores for the single-nodes.
+#'  1) transform the input graph into a new graph by collapsing connected positive nodes into a meta-node. As such, meta-nodes are isolated to each other but are linked via negative nodes (single-nodes). Clearly, meta-nodes have positive scores, and negative scores for the single-nodes.
 #'
-#'  ii) append the weight attribute to the edges in the transformed graph. There are two types of edges: 1) the single-single edge with two single-nodes as two ends, and 2) single-meta edge with a single-node as one end and a meta-node as the other end. The weight for a single-single edge is the absolute sum of the scores in its two-end single-nodes but normalised by their degrees. The weight for a single-meta edge is simply the absolute score in its single-node end normalised by the degree. As such, weights are all non-negative.
+#'  2) append the weight attribute to the edges in the transformed graph. There are two types of edges: i) the single-single edge with two single-nodes as two ends, and ii) single-meta edge with a single-node as one end and a meta-node as the other end. The weight for a single-single edge is the absolute sum of the scores in its two-end single-nodes but normalised by their degrees. The weight for a single-meta edge is simply the absolute score in its single-node end normalised by the degree. As such, weights are all non-negative.
 #'
-#'  iii) find minimum spanning tree (MST) in the weighted transformed graph using Prim's greedy algorithm. A spanning tree of the weighted graph is a subgraph that is tree and connects all the node together. The MST is a spanning tree with the sum of its edge weights minimised amongst all possible spanning trees.
+#'  3) find minimum spanning tree (MST) in the weighted transformed graph. A spanning tree of the weighted graph is a subgraph that is tree and connects all the node together. The MST is a spanning tree with the sum of its edge weights minimised amongst all possible spanning trees.
 #'
-#'  iv) find all shortest paths between any pair of meta-nodes in the MST. Within the weighted transformed graph in ii), a subgraph is induced containing nodes (only occuring in these shortest paths) and all edges between them.
+#'  4) find all shortest paths between any pair of meta-nodes in the MST. Within the weighted transformed graph in 2), a subgraph is induced containing nodes (only occuring in these shortest paths) and all edges between them.
 #'
-#'  v) within the induced subgraph, identify single-nodes that are direct neighbors of meta-nodes. For each of these single-nodes, also make sure it has the absolute scores no more than the sum of scores in its neighboring meta-nodes. These single-nodes meeting both criteria are called "linkers".
+#'  5) within the induced subgraph, identify single-nodes that are direct neighbors of meta-nodes. For each of these single-nodes, also make sure it has the absolute scores no more than the sum of scores in its neighboring meta-nodes. These single-nodes meeting both criteria are called "linkers".
 #'
-#'  vi) still within the induced subgraph in v), find the linker graph that contains only linkers and edges between them. Similarly to iii), find MST of the linker graph, called 'linker MST'. Notably, this linker MST serves as the scaffold, which only contains linkers but has meta-nodes being direcly attached to.
+#'  6) still within the induced subgraph from 5), find the linker graph(s) that contains only linkers and edges between them. This will most likely be disconnected, resulting in multiple components. Similarly to 3), find MST of the linker graph(s), called 'linker MST'. Notably, these linker MST(s) serves as the scaffold, which only contains linkers but has meta-nodes being direcly attached to.
 #'
-#'  vii) in linker MST plus its attached meta-nodes, find the optimal path that has the sum of scores of its nodes and attached meta-nodes maximised amongest all possible paths. Nodes along this optimal path plus their attached meta-nodes are called 'subgraph nodes'.
+#'  7) In each linker MST plus its attached meta-nodes, find the optimal path that has the sum of scores of its nodes and attached meta-nodes maximized amongest all possible paths. Nodes along these optimal paths plus their attached meta-nodes are called 'subgraph nodes'.
 #'
-#'  viii) finally, from the input graph extract a subgraph (called 'subgraph') that only contains subgraph nodes and edges betwen them. This subgraph is the maximum scoring subgraph containing the positive nodes as many as possible, but the negative nodes as few as possible.
+#'  8) For each set of 'subgraph nodes', extract a subgraph (called 'subgraph') from the input graph that only contains subgraph nodes and edges betwen them. 
+#'  
+#'  9) Starting with the highest scoring subgraph, and in descending order based on sum of scores for each 'subgraph', merge two subgraphs. If the resulting subgraph sum of scores is greater than previous score, keep this merged subgraph. Else, move to the next subgraph.
+#'  
+#'  10) Take the largest connected component of this (possibly merged) subgraph. This subgraph is the maximum scoring subgraph containing the positive nodes as many as possible, but the negative nodes as few as possible.
 #'
 #' @note Adapted from the _dnet_ package to be much faster, with solutions closer to optimality. Based on method from the _BioNet_ package.
 #'
@@ -40,9 +44,10 @@
 #' g_scores <- rnorm(100)
 #' names(g_scores) <- 1:100
 #'
-#' new_g <- solve_MWCS(ig = graph, scores = g_scores, min_cluster_size = 2)
+#' new_g <- solve_MWCS(ig = graph, scores = g_scores)
 #'
 #' @export
+#' 
 solve_MWCS <- function(ig, scores, min_cluster_size = 2) {
   if(!igraph::is_igraph(ig)) {
     stop("The function must apply to an 'igraph' object.\n")
@@ -67,9 +72,11 @@ solve_MWCS <- function(ig, scores, min_cluster_size = 2) {
   if(length(pos_nodes) == 0) {
     warning("No positive nodes")
     subgraph <- igraph::make_empty_graph(n = 0, directed = FALSE)
+    return(subgraph)
   } else if(length(pos_nodes) == 1) {
     subgraph <- igraph::induced_subgraph(ig, pos_nodes)
     V(subgraph)$type <- "desired"
+    return(subgraph)
   } else {
     # Get the subgraphs consisting of only positive nodes
     pos_subgraph <- igraph::induced_subgraph(ig, pos_nodes)
@@ -195,7 +202,7 @@ solve_MWCS <- function(ig, scores, min_cluster_size = 2) {
       class(subgraph) <- original_classes
       return(subgraph)
     } else {
-      subg <- igraph::induced_subgraph(sub_mig, neg_node_ids2) # 'linker' graph
+      subg <- igraph::induced_subgraph(sub_mig, neg_node_ids2) # 'linker' graph(s)
       if(!igraph::is_connected(subg, mode = "weak")) {
         clust <- igraph::components(subg, mode = "weak")
         max_cluster_size <- max(clust$csize)
@@ -244,7 +251,7 @@ solve_MWCS <- function(ig, scores, min_cluster_size = 2) {
             best_path <- best_path[names_list]
           }
           # Induce a subgraph from input graph containing only
-          # nodes along this best path and edges between them
+          #   nodes along this best path and edges between them
           pos_cluster <- V(sub_mig)[unique(unlist(V(mst_subg_tmp)[best_path]$clusters))]$name
           tmp <- unlist(strsplit(pos_cluster, "cluster"))
           ttmp <- as.numeric(matrix(tmp, nrow = 2)[2, ])
@@ -259,9 +266,7 @@ solve_MWCS <- function(ig, scores, min_cluster_size = 2) {
           V(subgraph)$type <- type
           subgraph_list[[j]] <- subgraph
         }
-        # subgraph_list <- subgraph_list[order(unlist(lapply(subgraph_list, vcount)), decreasing = TRUE)] # graphs are in descending order
-        subgraph_list <- subgraph_list[order(unlist(lapply(subgraph_list, function(x) sum(igraph::vertex_attr(x, van)))), decreasing = TRUE)] # graphs are in descending order by sum of scores (4/25)
-        # subgraph_scores <- lapply(subgraph_list, function(x) sum(igraph::vertex_attr(x, van)))
+        subgraph_list <- subgraph_list[order(unlist(lapply(subgraph_list, function(x) sum(igraph::vertex_attr(x, van)))), decreasing = TRUE)] # graphs are in descending order by sum of scores
         g_tmp <- subgraph_list[[1]]
         score_tmp <- sum(igraph::vertex_attr(subgraph_list[[1]], van))
         ll <- ifelse(length(subgraph_list) > 1, 2, 1)
@@ -274,7 +279,7 @@ solve_MWCS <- function(ig, scores, min_cluster_size = 2) {
             score_tmp <- score_tmp2
           }
         }
-        ### Take largest connected component, or take component with largest sum of scores ???
+        ### Take component with largest sum of scores
         if(!igraph::is_connected(g_tmp, mode = "weak")) {
           g_tmp <- getBestComponent(g_tmp, van)
         }
@@ -323,7 +328,7 @@ solve_MWCS <- function(ig, scores, min_cluster_size = 2) {
           best_path <- best_path[names_list]
         }
         # Induce a subgraph from input graph containing only
-        # nodes along this best path and edges between them
+        #   nodes along this best path and edges between them
         pos_cluster <- V(sub_mig)[unique(unlist(V(mst_subg)[best_path]$clusters))]$name
         tmp <- unlist(strsplit(pos_cluster, "cluster"))
         ttmp <- as.numeric(matrix(tmp, nrow = 2)[2, ])
@@ -353,16 +358,12 @@ solve_MWCS <- function(ig, scores, min_cluster_size = 2) {
 #' @description The 'best' is the component with the largest sum of a numeric vertex attribute given by 'v_attr_name'.
 #' 
 #' @param g igraph
-#' @param v_attr_name vertex attribute name whose sum for each component will determine the 
+#' @param v_attr_name vertex attribute name whose sum for each component will determine the
 #' 
 #' @return connected igraph
-#' 
-#' @examples 
-#' library(igraph)
-#' g <- sample_grg(100, 0.08)
-#' V(g)$score <- rnorm(100)
-#' g_best <- getBestComponent(g = g, v_attr_name = "score")
-#' 
+#'
+#' @noRd
+#'
 getBestComponent <- function(g, v_attr_name) {
   if(!(is.character(v_attr_name) && length(v_attr_name) == 1) || !v_attr_name %in% igraph::vertex_attr_names(g) || !is.numeric(igraph::vertex_attr(g, v_attr_name))) {
     stop("'v_attr_name' must be a character string corresponding to a numeric vertex attribute of 'g'.")
