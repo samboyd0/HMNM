@@ -4,7 +4,64 @@
 \alias{AMEND}
 \title{Identify modules from a network}
 \usage{
-AMEND(...)
+AMEND(
+  network_layers,
+  bipartite_networks = NULL,
+  network_hierarchy = NULL,
+  n = NULL,
+  data = NULL,
+  brw_attr = NULL,
+  FUN = NULL,
+  FUN_params = NULL,
+  directed = FALSE,
+  aggregate_layers = NULL,
+  normalize = c("degree", "modified_degree"),
+  k = 0.5,
+  degree_bias = NULL,
+  crosstalk_params = NULL,
+  seed_weights = NULL,
+  verbose = FALSE,
+  in_parallel = FALSE,
+  n_cores = NULL,
+  eta = NULL
+)
+}
+\arguments{
+\item{network_layers, bipartite_networks}{Single network-like object (igraph, adjacency matrix, or edgelist) or a list of these. If a list, it must be named, with names matching category names in \strong{network_hierarchy}. If multiple layers are contained in a single object, the list name must include these layer names separated by "|". \strong{bipartite_networks} should contain the mappings between different layers. Elements in \strong{bipartite_networks} list can be set to "common", which will connect all common nodes between the designated layers.}
+
+\item{network_hierarchy}{A 2-column matrix representing an edgelist for the network hierarchy, where hierarchy vertices represent categories which categorize the network nodes. Or an object of class 'hierarchy' as a result from \code{create_network_hierarchy()}.}
+
+\item{n}{Final module size which the algorithm will try to approximate. NULL to get maximum-scoring subnetwork.}
+
+\item{data}{Named list of numeric vectors, a single numeric vector, a character string, or NULL (default). Used to calculate seeds values for RWR (with \strong{FUN} and \strong{FUN_params}). Names of list should match layer names. Numeric values must be named with the corresponding node name. If a string, this should be the vertex attribute name (for igraph inputs) containing the data. NULL gives uniform seed values within each layer.}
+
+\item{brw_attr}{Similar format as \strong{data}. Contains values to be used in a biased random walk. Should contain non-negative values.}
+
+\item{FUN}{Function, list of functions, or a character string denoting a default function ('binary', 'shift_scale', 'p_value', or 'exp'), to be applied to \strong{data} to compute seed values for RWR. Names of list must match layer names. NULL (default) applies no transformation of values in \strong{data}. Optional function arguments given in \strong{FUN_params}.}
+
+\item{FUN_params}{List or list of lists, containing additional function arguments for functions given in \strong{FUN}. NULL (default) doesn't supply any additional function arguments.}
+
+\item{directed}{Logical. Whether the input network should be treated as directed.}
+
+\item{aggregate_layers}{NULL (default) or a list containing sets of layer names to aggregate after RWR but before node filtering. Set to NULL for no aggregation. The first layer in a set is taken as the primary layer, whose edges will be preferentially used during the node filtering step in AMEND.}
+
+\item{normalize}{Adjacency matrix normalization method to construct transition matrix.}
+
+\item{k}{Penalization factor for normalize="modified_degree". Must be non-negative, with larger values resulting in a greater penalty for node degree, in an effort to mitigate degree bias.}
+
+\item{degree_bias}{A character vector or list, or NULL (default). The character vector denotes the layers to which the degree bias mitigation method will be applied. The list must contain this character vector of layers (named 'layers') and a numeric scalar (named 'gamma') between 0 and 1 denoting the strength of degree bias mitigation. The default gamma value is 0.2. Set to NULL for no degree bias adjustment.}
+
+\item{crosstalk_params}{A named numeric vector containing the crosstalk parameters for each category in network hierarchy. If NULL (default), a uniform value of 0.5 is set. Hierarchicy categories not given in \emph{crosstalk_params} will be given this default value of 0.5.}
+
+\item{seed_weights}{A list of named numeric vectors, or NULL (default). List elements should correspond to sibling sets of categories in network hierarchy. Values in each set must sum to one. NULL gives uniform values within each sibling set.}
+
+\item{verbose}{Logical. Whether to print information on algorithm progress.}
+
+\item{in_parallel}{Logical. Whether to run certain operations in parallel, using the \emph{parallel}, \emph{doParallel} and \emph{foreach} packages.}
+
+\item{n_cores}{Numeric scalar or NULL (default). Number of cores to use during parallel processing. If NULL and in_parallel=TRUE, defaults to two-thirds the number of cores detected on machine.}
+
+\item{eta}{Numeric scalar or NULL (default). Starting filtering rate for AMEND algorithm. If NULL, this is set automatically to approximate the user-specified final module size \emph{n}.}
 }
 \value{
 a named list with the following elements:

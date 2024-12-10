@@ -356,9 +356,7 @@ module_identification <- function(network_layers, bipartite_networks = NULL, net
 
 #' @inherit module_identification
 #' @export
-AMEND <- function(...) {
-  module_identification(...)
-}
+AMEND <- module_identification
 
 
 #' @title Get a larger subnetwork from previous iterations of the AMEND algorithm
