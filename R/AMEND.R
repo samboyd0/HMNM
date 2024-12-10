@@ -5,7 +5,7 @@
 #' @title Identify modules from a network
 #' 
 #' @description 
-#' Given a network (or several networks, to be connected) with node-wise data, `module_identification()` uses the __AMEND__ algorithm to identify a single module containing highly-connected nodes with large data values. `AMEND()` is an alias.
+#' Given a network (or several networks, to be connected) with node-wise data, this function uses the __AMEND__ algorithm to identify a single module containing highly-connected nodes with large data values. `module_identification()` and `AMEND()` are aliases.
 #'
 #' @section Algorithm Overview: 
 #' 
@@ -42,7 +42,7 @@
 #' __seed_weights__ represent the relative weight to give to seeds values of a certain layer or sets of layers. These should be supplied for all sets of categories in hierarchy that share a common parent (i.e., siblings).
 #' 
 #' @note
-#' `module_identification()` uses _node_specific_restart_=TRUE for `RWR()`, with _node_connectivity_score_ coming from `node_connectivity_score(..., inverse=TRUE, mode="core")`.
+#' Uses _node_specific_restart_=TRUE for `RWR()`, with _node_connectivity_score_ coming from `node_connectivity_score(..., inverse=TRUE, mode="core")`.
 #' 
 #' @inheritParams create_integrated_network
 #' @inheritParams RWR

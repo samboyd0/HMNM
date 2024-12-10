@@ -75,10 +75,10 @@ a named list with the following elements:
 }
 }
 \description{
-Given a network (or several networks, to be connected) with node-wise data, \code{module_identification()} uses the \strong{AMEND} algorithm to identify a single module containing highly-connected nodes with large data values. \code{AMEND()} is an alias.
+Given a network (or several networks, to be connected) with node-wise data, this function uses the \strong{AMEND} algorithm to identify a single module containing highly-connected nodes with large data values. \code{module_identification()} and \code{AMEND()} are aliases.
 }
 \note{
-\code{module_identification()} uses \emph{node_specific_restart}=TRUE for \code{RWR()}, with \emph{node_connectivity_score} coming from \code{node_connectivity_score(..., inverse=TRUE, mode="core")}.
+Uses \emph{node_specific_restart}=TRUE for \code{RWR()}, with \emph{node_connectivity_score} coming from \code{node_connectivity_score(..., inverse=TRUE, mode="core")}.
 }
 \section{Algorithm Overview}{
 
