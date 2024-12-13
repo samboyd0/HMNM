@@ -43,7 +43,7 @@ The two main analysis methods available in _HMNM_ are RWR and the [AMEND](https:
 
 ## Installation
 
-You can install _HMNM_ from [GitHub](https://github.com/samboyd0/HMNM) with:
+You can install _HMNM_ in R with:
 
 ``` r
 devtools::install_github("samboyd0/HMNM", build_vignettes = TRUE)
@@ -51,7 +51,7 @@ devtools::install_github("samboyd0/HMNM", build_vignettes = TRUE)
 
 ## Vignette
 
-A vignette is available that illustrates how to use the _HMNM_ package. It can be accessed with the following code.
+A vignette is available that illustrates how to use the _HMNM_ package. It can be accessed with the following R code.
 
 ``` r
 vignette("use_HMNM", package = "HMNM")

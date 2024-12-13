@@ -80,8 +80,7 @@ include several node types, edge types, and data types.
 
 ## Installation
 
-You can install *HMNM* from [GitHub](https://github.com/samboyd0/HMNM)
-with:
+You can install *HMNM* in R with:
 
 ``` r
 devtools::install_github("samboyd0/HMNM", build_vignettes = TRUE)
@@ -90,7 +89,7 @@ devtools::install_github("samboyd0/HMNM", build_vignettes = TRUE)
 ## Vignette
 
 A vignette is available that illustrates how to use the *HMNM* package.
-It can be accessed with the following code.
+It can be accessed with the following R code.
 
 ``` r
 vignette("use_HMNM", package = "HMNM")
