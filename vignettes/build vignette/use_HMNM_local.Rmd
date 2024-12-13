@@ -13,10 +13,10 @@ To render vignette:
   devtools::build_rmd("vignettes/Local Files/use_HMNM_local.Rmd")
 
 Alternative::
-To render Vignette:
-  1) Duplicate vignette file and add '.orig' extension 
+To make Vignette file:
+  1) Duplicate this vignette file and add '.orig' extension 
   2) Run this code to locally knit the vignette.
-  source("/Users/samboyd/Documents/HMNM/R package/HMNM/vignettes/makeVignette-use_HMNM.R")
+  source("/Users/samboyd/Documents/HMNM/R package/HMNM/vignettes/build vignette/makeVignette-use_HMNM.R")
 PURPOSE: Vignette may take a long time to run or rely on large datasets not available on build.
 
 Resource:
@@ -127,8 +127,8 @@ The _HMNM_ package (Hierarchical Multilayer Network Models) provides functionali
 Below is an example of a hierarchy of a multilayer network. There are 3 levels corresponding to the factors "Molecule Type", "Interaction Type", and "Omic Type". Level 0 serves only as a structural anchor to ensure the hierarchy remains connected. It does not represent any factor and does not need to be set by the user. The top level is level 1, which has categories with directed edges pointing to categories of level 2. The leaf categories at the bottom level (in green, level 3) are associated with individual layers of the multilayer network, with layers represented by solid black circles. The nodes and edges of each layer are defined by the combination of its ancestor categories in the hierarchy. Not shown are possible inter-layer connections. The purpose of the hierarchy is to govern how information flows during diffusion processes, namely Random Walk with Restart (RWR); information is shared more easily between layers located closer in the hierarchy. One guiding principle for hierarchy design can be to set the factors for each level such that more similar layers are closer together in the hierarchy.
 
 ```{r intro1, echo=FALSE, out.width="100%"}
-# knitr::include_graphics(system.file("vignettes/images/example_hierarchy_root.png", package = "HMNM"))
-# knitr::include_graphics(paste0(path_to_images, "example_hierarchy_root.png"))
+# knitr::include_graphics(system.file("vignettes/images/example_hierarchy_root2.png", package = "HMNM"))
+# knitr::include_graphics(paste0(path_to_images, "example_hierarchy_root2.png"))
 ```
 
 Below is the corresponding adjacency matrix for the multilayer network described by the above hierarchy. Each colored rectangle corresponds to a category in the hierarchy and encompasses the layers it is associated with. Intra-layer adjacency matrices are given by __A__'s and inter-layer/bipartite adjacency matrices are given by __B__'s.
@@ -162,8 +162,8 @@ First, we start with our network data. We will use physical PPIs in Homo sapiens
 ```{r sl1}
 # Attach necessary libraries
 library(HMNM)
-library(igraph)
-library(dplyr)
+suppressMessages(library(igraph))
+suppressMessages(library(dplyr))
 
 # Threshold for edges weights
 edge_threshold <- 0.7
@@ -281,7 +281,7 @@ net_hier <- create_network_hierarchy(el = net_hier)
 
 class(net_hier)
 
-plot(net_hier)
+# plot(net_hier)
 ```
 
 For _Tissue_, we have categories _blood_ and _liver_. For _Molecule_, we have categories _prot_, _meta_, _prot2_, and _meta2_, which refer to proteins and metabolites. _prot_ and _prot2_ both refer to proteins but have different names to reflect the fact that they come from different tissues (same for _meta_ and _meta2_). For _Data_, we have categories _protdat_, _phosphdat_, _metadat_, _protdat2_, and _metadat2_. 
@@ -365,8 +365,9 @@ mmi_el <- net_el[[2]]
 ppi_names <- unique(c(ppi_el[,1], ppi_el[,2]))
 mmi_names <- unique(c(mmi_el[,1], mmi_el[,2]))
 
-# Only keep relevant bipartite edges [bottleneck]
-bp_el <- bp_el[apply(bp_el, 1, function(x) all(x[1:2] %in% c(ppi_names, mmi_names))),]
+# Only keep relevant bipartite edges
+matches <- bp_el[,1] %in% c(ppi_names, mmi_names) & bp_el[,2] %in% c(ppi_names, mmi_names)
+bp_el <- bp_el[matches,]
 
 # Add layer information to map each node to a specific layer
 bp_el1 <- cbind(bp_el, "layer1" = "meta", "layer2" = "prot")
@@ -445,7 +446,6 @@ net <- create_integrated_network(network_layers = layer_inputs,
                                  in_parallel = TRUE)
 
 # Inspect result
-print(names(net))
 class(net$network)
 net$network
 table(V(net$network)$layer)
@@ -464,7 +464,7 @@ Crosstalk parameters (_crosstalk_params_ arg) govern the amount of information t
 
 ```{r ml5}
 # A default value of 0.5 is given to categories not included in crosstalk_params
-crosstalk_params <- c(protdat = 0.2, phosphdat = 0.2, meta = 0.7)
+crosstalk_params <- c(protdat = 0.2, phosphdat = 0.2, meta = 0.7, prot = 0.2, prot2 = 0.3)
 ```
 
 Seed weight govern the relative weight of seed vectors associated with a layer or sets of layers. For each sibling set of categories in the hierarchy, there can be a set of seed weights (which sum to 1) that give the relative weight of the seed sets associated with each category. For example, in the code below we have `seed_weights[[1]] = c(c(protdat = 0.4, phosphdat = 0.6))`, which will multiply the seed vectors of the layers associated with _protdat_ and _phosphdat_ by 0.4 and 0.6, respectively. Use `seed_weight_sets()` to determine which set of categories in your hierarchy should be given seed weights.
@@ -522,7 +522,6 @@ if(0) {
                FUN = FUN,
                FUN_params = FUN_params,
                directed = FALSE,
-               in_parallel = TRUE,
                n = 50,
                normalize = "modified_degree", 
                k = 0.5, 
@@ -533,7 +532,6 @@ if(0) {
 }
 
 # Time
-print(igraph::vcount(net$network)) # Size of input network
 print(mod$time)
 
 # Active module
@@ -556,8 +554,8 @@ head(mod$subnetworks[[9]])
 g_tmp <- get_subnetwork(ig = net$network, amend_object = mod, k = 9)
 table(V(g_tmp)$layer)
 
-# When was protein ENSP00000383392 removed?
-protein <- "ENSP00000383392"
+# When was protein ENSP00000229829 removed?
+protein <- "ENSP00000229829"
 
 iter_removed <- which(unlist(lapply(mod$subnetworks, function(x){
   !protein %in% extract_string(x, "\\|", 1)

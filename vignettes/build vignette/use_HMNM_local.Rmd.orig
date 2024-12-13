@@ -13,10 +13,10 @@ To render vignette:
   devtools::build_rmd("vignettes/Local Files/use_HMNM_local.Rmd")
 
 Alternative::
-To render Vignette:
-  1) Duplicate vignette file and add '.orig' extension 
+To make Vignette file:
+  1) Duplicate this vignette file and add '.orig' extension 
   2) Run this code to locally knit the vignette.
-  source("/Users/samboyd/Documents/HMNM/R package/HMNM/vignettes/makeVignette-use_HMNM.R")
+  source("/Users/samboyd/Documents/HMNM/R package/HMNM/vignettes/build vignette/makeVignette-use_HMNM.R")
 PURPOSE: Vignette may take a long time to run or rely on large datasets not available on build.
 
 Resource:
@@ -100,15 +100,6 @@ remove_duplicate_edges <- function(el) {
   return(el)
 }
 
-extract_string <- function(x, k, pos) {
-  if(pos == 0) {
-    res <- unlist(lapply(strsplit(x, k), function(y) y[1:length(y)]))
-  } else {
-    res <- unlist(lapply(strsplit(x, k), function(y) y[min(length(y), pos)]))
-  }
-  return(res)
-} 
-
 sim_pvalues <- function(x, k) {
     n <- length(x)
     # Step 1: Take absolute value
@@ -137,14 +128,14 @@ Below is an example of a hierarchy of a multilayer network. There are 3 levels c
 
 ```{r intro1, echo=FALSE, out.width="100%"}
 # knitr::include_graphics(system.file("vignettes/images/example_hierarchy_root.png", package = "HMNM"))
-knitr::include_graphics(paste0(path_to_images, "example_hierarchy_root.png"))
+# knitr::include_graphics(paste0(path_to_images, "example_hierarchy_root.png"))
 ```
 
 Below is the corresponding adjacency matrix for the multilayer network described by the above hierarchy. Each colored rectangle corresponds to a category in the hierarchy and encompasses the layers it is associated with. Intra-layer adjacency matrices are given by __A__'s and inter-layer/bipartite adjacency matrices are given by __B__'s.
 
 ```{r intro2, echo=FALSE, out.width="100%"}
 # knitr::include_graphics(system.file("vignettes/images/example_adjmat.png", package = "HMNM"))
-knitr::include_graphics(paste0(path_to_images, "example_adjmat.png"))
+# knitr::include_graphics(paste0(path_to_images, "example_adjmat.png"))
 ```
 
 The following vignette will go over two examples: one simple and one complex. It will highlight typical steps for pre-processing inputs to _HMNM_ functions as well as key package features, such as multilayer network construction and module identification. Below are some general steps in a network analysis workflow using _HMNM_:
@@ -171,8 +162,8 @@ First, we start with our network data. We will use physical PPIs in Homo sapiens
 ```{r sl1}
 # Attach necessary libraries
 library(HMNM)
-library(igraph)
-library(dplyr)
+suppressMessages(library(igraph))
+suppressMessages(library(dplyr))
 
 # Threshold for edges weights
 edge_threshold <- 0.7
@@ -374,8 +365,9 @@ mmi_el <- net_el[[2]]
 ppi_names <- unique(c(ppi_el[,1], ppi_el[,2]))
 mmi_names <- unique(c(mmi_el[,1], mmi_el[,2]))
 
-# Only keep relevant bipartite edges [bottleneck]
-bp_el <- bp_el[apply(bp_el, 1, function(x) all(x[1:2] %in% c(ppi_names, mmi_names))),]
+# Only keep relevant bipartite edges
+matches <- bp_el[,1] %in% c(ppi_names, mmi_names) & bp_el[,2] %in% c(ppi_names, mmi_names)
+bp_el <- bp_el[matches,]
 
 # Add layer information to map each node to a specific layer
 bp_el1 <- cbind(bp_el, "layer1" = "meta", "layer2" = "prot")
@@ -454,7 +446,6 @@ net <- create_integrated_network(network_layers = layer_inputs,
                                  in_parallel = TRUE)
 
 # Inspect result
-print(names(net))
 class(net$network)
 net$network
 table(V(net$network)$layer)
@@ -473,12 +464,14 @@ Crosstalk parameters (_crosstalk_params_ arg) govern the amount of information t
 
 ```{r ml5}
 # A default value of 0.5 is given to categories not included in crosstalk_params
-crosstalk_params <- c(protdat = 0.2, phosphdat = 0.2, meta = 0.7)
+crosstalk_params <- c(protdat = 0.2, phosphdat = 0.2, meta = 0.7, prot = 0.2, prot2 = 0.3)
 ```
 
-Seed weight govern the relative weight of seed vectors associated with a layer or sets of layers. For each sibling set of categories in the hierarchy, there can be a set of seed weights (which sum to 1) that give the relative weight of the seed sets associated with each category. For example, in the code below we have `seed_weights[[1]] = c(c(protdat = 0.4, phosphdat = 0.6))`, which will multiply the seed vectors of the layers associated with _protdat_ and _phosphdat_ by 0.4 and 0.6, respectively.
+Seed weight govern the relative weight of seed vectors associated with a layer or sets of layers. For each sibling set of categories in the hierarchy, there can be a set of seed weights (which sum to 1) that give the relative weight of the seed sets associated with each category. For example, in the code below we have `seed_weights[[1]] = c(c(protdat = 0.4, phosphdat = 0.6))`, which will multiply the seed vectors of the layers associated with _protdat_ and _phosphdat_ by 0.4 and 0.6, respectively. Use `seed_weight_sets()` to determine which set of categories in your hierarchy should be given seed weights.
 
 ```{r ml6}
+# Determine which sets of categories in your network hierarchy should be given seed weights for use in `RWR()`
+seed_weight_sets(net_hier)
 # Uniform seed weights will be given to sibling sets not included in seed_weights
 seed_weights <- list(c(protdat = 0.4, phosphdat = 0.6),
                        c(prot = 0.75, meta = 0.25),
@@ -487,7 +480,7 @@ seed_weights <- list(c(protdat = 0.4, phosphdat = 0.6),
 
 ## Degree Bias Adjustment
 
-AMEND also has functionality for mitigating degree bias by applying a degree bias adjustment method to specific layers in the network (see `?bistochastic_scaling`). The input for this argument will be a list of two elements: a character vector denoting the layers to which the degree bias adjustment method will be applied, and a numeric scalar between 0 and 1 denoting the strength of this adjustment (1 for maximum adjustment, 0 for no adjustment).
+AMEND also has functionality for mitigating degree bias by applying a degree bias adjustment method to specific layers in the network (see `?bistochastic_scaling`). One major source of degree bias is study bias, when certain molecules are studied more often than others, translating into an artificially high degree in interaction networks compared to less well-stuidied molecules. Bistochastic scaling reduces the influence that node degree has on diffusion scores. The input for this argument will be a list of two elements: a character vector denoting the layers to which the degree bias adjustment method will be applied, and a numeric scalar between 0 and 1 denoting the strength of this adjustment (1 for maximum adjustment, 0 for no adjustment).
 
 ```{r ml7}
 # Adjusting for degree bias in MMI network layers
@@ -529,7 +522,6 @@ if(0) {
                FUN = FUN,
                FUN_params = FUN_params,
                directed = FALSE,
-               in_parallel = TRUE,
                n = 50,
                normalize = "modified_degree", 
                k = 0.5, 
@@ -553,7 +545,7 @@ head(V(mod$module)$original_name)
 
 ## Investigate previous subnetworks
 
-Since the AMEND algorithm iteratively filters out nodes to arrive at a final module, there are intermediate subnetworks associated with each iteration. A subnetwork at an earlier iteration contains the subnetworks of all later iterations. This function can be used to investigate these earlier subnetworks, for example, to identify when in the algorithm certain nodes were removed.
+Since the AMEND algorithm iteratively filters out nodes to arrive at a final module, there are intermediate subnetworks associated with each iteration. A subnetwork at an earlier iteration contains the subnetworks of all later iterations. This function can be used to investigate these earlier subnetworks. `mod$subnetworks` can also be used to identify when in the algorithm certain nodes were removed.
 
 ```{r ml10}
 # Nodes in subnetwork at the end of iteration 9
@@ -563,8 +555,8 @@ head(mod$subnetworks[[9]])
 g_tmp <- get_subnetwork(ig = net$network, amend_object = mod, k = 9)
 table(V(g_tmp)$layer)
 
-# When was protein ENSP00000383392 removed?
-protein <- "ENSP00000383392"
+# When was protein ENSP00000229829 removed?
+protein <- "ENSP00000229829"
 
 iter_removed <- which(unlist(lapply(mod$subnetworks, function(x){
   !protein %in% extract_string(x, "\\|", 1)
