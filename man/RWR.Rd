@@ -12,7 +12,7 @@ RWR(
   network_hierarchy,
   node_specific_restart = FALSE,
   node_connectivity_scores,
-  max_iters = 100
+  max_iters = 500
 )
 }
 \arguments{

@@ -2,7 +2,6 @@
 % Please edit documentation in R/AMEND.R
 \name{module_identification}
 \alias{module_identification}
-\alias{AMEND}
 \title{Identify modules from a network}
 \usage{
 module_identification(
@@ -28,7 +27,7 @@ module_identification(
 )
 }
 \arguments{
-\item{network_layers, bipartite_networks}{Single network-like object (igraph, adjacency matrix, or edgelist) or a list of these. If a list, it must be named, with names matching category names in \strong{network_hierarchy}. If multiple layers are contained in a single object, the list name must include these layer names separated by "|". \strong{bipartite_networks} should contain the mappings between different layers. Elements in \strong{bipartite_networks} list can be set to "common", which will connect all common nodes between the designated layers.}
+\item{network_layers, bipartite_networks}{Single network-like object (igraph, adjacency matrix, or edgelist) or a list of these. If a list, it must be named, with names matching category names in \strong{network_hierarchy}. If multiple layers are contained in a single object, the list name must include these layer names separated by "|". \strong{bipartite_networks} should contain the mappings between different layers. Elements in \strong{bipartite_networks} list can be set to "common", which will connect all common nodes between the designated layers. Third column of edgelists are assumed to be edge weights unless colname "weight" is present.}
 
 \item{network_hierarchy}{A 2-column matrix representing an edgelist for the network hierarchy, where hierarchy vertices represent categories which categorize the network nodes. Or an object of class 'hierarchy' as a result from \code{create_network_hierarchy()}.}
 
