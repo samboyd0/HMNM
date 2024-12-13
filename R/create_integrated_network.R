@@ -1,18 +1,3 @@
-#=====#
-# HMNM
-#=====#
-
-# NOTES:
-# - Use 'network' instead of 'graph' at user-level (function names, function arguments, documentation)
-# - Get adj mat and edgelist inputs to igraphs as early as possible
-# - If no network hierarchy is supplied, create a dummy graph with 'root' and 'cat1' nodes
-# - Pre-merged network objects must be in a list with the list name containing all layers contained in that merged network separated by "|"
-# - Never use 'original_name' vertex attribute to query nodes!!!
-#   - This is because I'm allowing users to have "|" in their node names, even though it's used as a delimiter. I substitute "_" for "|", but keep original names (which may include "|") in separate vertex attr.
-
-#===================================================================#
-#===================================================================#
-#===================================================================#
 
 #' @importFrom igraph V V<- E E<- 
 
@@ -30,7 +15,7 @@
 #' 
 #' Seed values for RWR are computed from __data__, __FUN__, and __FUN_params__. Users can also supply node-wise values in __brw_attr__ for a biased random walk, where larger values will increase transition probabilities to nodes during RWR.
 #' 
-#' @param network_layers,bipartite_networks Single network-like object (igraph, adjacency matrix, or edgelist) or a list of these. If a list, it must be named, with names matching category names in __network_hierarchy__. If multiple layers are contained in a single object, the list name must include these layer names separated by "|". __bipartite_networks__ should contain the mappings between different layers. Elements in __bipartite_networks__ list can be set to "common", which will connect all common nodes between the designated layers.
+#' @param network_layers,bipartite_networks Single network-like object (igraph, adjacency matrix, or edgelist) or a list of these. If a list, it must be named, with names matching category names in __network_hierarchy__. If multiple layers are contained in a single object, the list name must include these layer names separated by "|". __bipartite_networks__ should contain the mappings between different layers. Elements in __bipartite_networks__ list can be set to "common", which will connect all common nodes between the designated layers. Third column of edgelists are assumed to be edge weights unless colname "weight" is present.
 #' @param network_hierarchy A 2-column matrix representing an edgelist for the network hierarchy, where hierarchy vertices represent categories which categorize the network nodes. Or an object of class 'hierarchy' as a result from `create_network_hierarchy()`.
 #' @param data Named list of numeric vectors, a single numeric vector, a character string, or NULL (default). Used to calculate seeds values for RWR (with __FUN__ and __FUN_params__). Names of list should match layer names. Numeric values must be named with the corresponding node name. If a string, this should be the vertex attribute name (for igraph inputs) containing the data. NULL gives uniform seed values within each layer.
 #' @param FUN Function, list of functions, or a character string denoting a default function ('binary', 'shift_scale', 'p_value', or 'exp'), to be applied to __data__ to compute seed values for RWR. Names of list must match layer names. NULL (default) applies no transformation of values in __data__. Optional function arguments given in __FUN_params__. 
@@ -121,12 +106,18 @@ create_integrated_network <- function(network_layers, bipartite_networks = NULL,
   # Also, checking correct formatting of igraph, adj mat, and edgelist
   # Then, converting all non-igraph objects to igraphs with "layer", "name", and "original_ID" vertex attributes
   if(in_parallel) {
+    # .Platform$OS.type # one of "unix" or "windows"
     `%dopar%` <- get("%dopar%", asNamespace("foreach"))
     nl_names <- names(network_layers)
     if(is.null(n_cores)) n_cores <- round(parallel::detectCores() * 0.66)
     cl <- parallel::makeForkCluster(n_cores, outfile = "")
     on.exit(parallel::stopCluster(cl))
-    if(!foreach::getDoParRegistered()) doParallel::registerDoParallel(cl)
+    # if(!foreach::getDoParRegistered()) doParallel::registerDoParallel(cl)
+    if(foreach::getDoParRegistered()) {
+      doParallel::stopImplicitCluster()
+      foreach::registerDoSEQ()  # Reset to sequential backend
+    }
+    doParallel::registerDoParallel(cl)
     network_layers <- foreach::foreach(i = seq_along(network_layers), .packages = c("igraph", "Matrix"), .verbose = FALSE, .export = NULL, .noexport = NULL) %dopar% {
       process_network_layers(obj = network_layers[[i]], 
                              obj_name = names(network_layers)[i], 
@@ -615,6 +606,7 @@ process_network_layers <- function(obj, obj_name, obj_type, multi, directed, net
       if(any(!tmp_leaf_nodes %in% attr(obj, "layer")) || any(!unique(attr(obj, "layer")) %in% tmp_leaf_nodes)) stop("For ", obj_name, ": Values of 'layer' attribute must match hierarchy leaf nodes corresponding to the multilayer input.")
       
     } else if(obj_type == "edgelist") {
+      if(ncol(obj) > 2 && !"weight" %in% colnames(obj)) colnames(obj)[3] <- "weight"
       
       if(ncol(obj) < 4 || any(!c("layer1", "layer2") %in% colnames(obj))) stop("For ", obj_name, ": Multilayer edgelists must have additional columns named 'layer1' and 'layer2', corresponding to the layers of nodes in the first and second columns, respectively.")
       
@@ -636,6 +628,7 @@ process_network_layers <- function(obj, obj_name, obj_type, multi, directed, net
       }
       attr(obj, "layer") <- rep(obj_name, nrow(obj))
     } else if(obj_type == "edgelist") {
+      if(ncol(obj) > 2 && !"weight" %in% colnames(obj)) colnames(obj)[3] <- "weight"
       obj <- cbind(obj, "layer1" = rep(obj_name, nrow(obj)), "layer2" = rep(obj_name, nrow(obj)))
     }
   }
@@ -746,6 +739,8 @@ process_bipartite_networks <- function(obj, obj_name, obj_type, network_layers, 
     if(any(!tmp_leaf_nodes %in% obj_leaf_nodes) || any(!obj_leaf_nodes %in% tmp_leaf_nodes)) stop("For ", obj_name, ": Values of 'layer' attribute must match hierarchicy nodes corresponding to the bipartite network input.")
     
   } else if(obj_type == "edgelist") {
+    
+    if(ncol(obj) > 2 && !"weight" %in% colnames(obj)) colnames(obj)[3] <- "weight"
     
     if(ncol(obj) < 4 || any(!c("layer1", "layer2") %in% colnames(obj))) stop("For ", obj_name, ": Bipartite edgelists must have additional columns named 'layer1' and 'layer2', corresponding to the layers of nodes in the first and second columns, respectively.")
     
@@ -1129,7 +1124,8 @@ set_brw_attr <- function(graph, brw_attr, BRW_NOI) {
     if(length(noi_id) > 0) {
       # Get distance to closest NOI for each node in graph
       d_mat <- igraph::distances(graph = graph, v = noi_id, mode = "all")
-      node_dists <- apply(d_mat, 2, mean)
+      node_dists <- apply(d_mat, 2, function(x) mean(x[is.finite(x)]))
+      node_dists[is.na(node_dists)] <- max(node_dists, na.rm = TRUE)
       # Calculate values for biased random walk
       alpha <- exp(-node_dists * k)
       while(any(alpha == 0 & !node_dists %in% c(0, Inf))) {
