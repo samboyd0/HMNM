@@ -153,12 +153,12 @@ RWR_pipeline <- function(network_layers, bipartite_networks = NULL, network_hier
 #' 
 #' @export
 #' 
-RWR <- function(tmat, seeds = NULL, seed_weights = NULL, restart = 0.5, network_hierarchy, node_specific_restart = FALSE, node_connectivity_scores, max_iters = 100) {
+RWR <- function(tmat, seeds = NULL, seed_weights = NULL, restart = 0.5, network_hierarchy, node_specific_restart = FALSE, node_connectivity_scores, max_iters = 500) {
   #=== Function settings ===#
   DEFAULT_RESTART <- 0.5
-  convergence_tol <- 1e-08
-  zero_tol <- 1e-10
-  max_iter_radj <- 400
+  convergence_tol <- 1e-10
+  zero_tol <- 1e-12
+  max_iter_radj <- 500
   
   #=== restart checks ===#
   if(is.null(restart) || is.na(restart) || restart < 0 || restart > 100) {
@@ -249,9 +249,8 @@ RWR <- function(tmat, seeds = NULL, seed_weights = NULL, restart = 0.5, network_
   p_i <- seeds
   if(restart != 1) {
     if(node_specific_restart) {
-      d0 <- node_connectivity_scores
-      l <- (colSums(d0 * p_i)) / (colSums(p_i ^ 2))
-      d <- d0 - l * p_i
+      l <- (colSums(node_connectivity_scores * p_i)) / (colSums(p_i ^ 2))
+      d <- node_connectivity_scores - l * p_i
       for(i in seq_len(max_iter_radj)) {
         if(all(d >= -restart) && all(d <= 1-restart)) break
         d[d < -restart] <- -restart
@@ -336,16 +335,17 @@ transition_matrix <- function(network, network_hierarchy, normalize = c("degree"
   # crosstalk_params is a named numeric vector, or NULL. If non-NULL, names correspond to nodes in hierarchy.
   # Values must be between zero and one.
   if(is.null(crosstalk_params)) {
-    crosstalk_params <- rep(DEFAULT_CROSSTALK, igraph::vcount(network_hierarchy) - 1)
-    names(crosstalk_params) <- V(network_hierarchy)$name[V(network_hierarchy)$level > 0]
+    crosstalk_params <- rep(DEFAULT_CROSSTALK, igraph::vcount(network_hierarchy))
+    names(crosstalk_params) <- V(network_hierarchy)$name
   }else if(is.numeric(crosstalk_params)) {
     if(is.null(names(crosstalk_params))) stop("crosstalk_params must be a named numeric vector or NULL.")
     if(any(crosstalk_params > 1) || any(crosstalk_params < 0)) stop("crosstalk_params values must be between 0 and 1.")
     
-    add_ct_params <- rep(DEFAULT_CROSSTALK, sum(!V(network_hierarchy)$name %in% names(crosstalk_params)) - 1)
-    names(add_ct_params) <- V(network_hierarchy)$name[!V(network_hierarchy)$name %in% names(crosstalk_params) & V(network_hierarchy)$level != 0]
+    add_ct_params <- rep(DEFAULT_CROSSTALK, sum(!V(network_hierarchy)$name %in% names(crosstalk_params)))
+    names(add_ct_params) <- V(network_hierarchy)$name[!V(network_hierarchy)$name %in% names(crosstalk_params)]
     
     crosstalk_params <- c(crosstalk_params, add_ct_params)
+    crosstalk_params[V(network_hierarchy)$name[V(network_hierarchy)$level == 0]] <- 0
   }else stop("Unrecognized input for crosstalk_params. Must be a named numeric vector or NULL.")
   
   #=== degree_bias Checks ===#
@@ -373,7 +373,6 @@ transition_matrix <- function(network, network_hierarchy, normalize = c("degree"
   # Layers of each node in adjacency matrix
   all_layers <- extract_string(rownames(adj_mat), "\\|", 2)
   
-  # BOTTLENECK
   tmat <- normalize_adjmat(adj_mat = adj_mat,
                            norm = normalize,
                            k = k,
@@ -575,18 +574,42 @@ get_diagonal <- function(X) {
 #'
 #' @noRd
 #'
-sum2one <- function(X, mode = "sparse", tol = 1e-12) {
+sum2one <- function(X, mode = "sparse") {
   if(mode == "sparse") {
-    col_sums <- Matrix::colSums(X)
-    col_sums[col_sums < tol] <- 1
-    col_sums_inv <- 1 / col_sums
-    X@x <- X@x * rep(col_sums_inv, diff(X@p))
-    X@x[abs(X@x) < tol] <- 0
+    X@x <- X@x * rep(1 / Matrix::colSums(X), diff(X@p))
     return(Matrix::drop0(X))
   } else if(mode == "dense") {
     X <- X / rep(colSums(X), each = nrow(X))
     return(X)
   }else stop("Unrecognized string for 'mode'.")
+}
+
+
+#' @title Scale rows of adjacency matrix
+#'
+#' @description Scale rows of adjacency matrix by `x`, or by row sums raised to the power `-k` (if `x` is NULL).
+#'
+#' @param adjM A sparse matrix of class dgCMatrix
+#' @param x numeric vector in same order as rows of `adjM`
+#' @param k non-negative number. Row sums will be raised to the power `-k` before row scaling.
+#'
+#' @returns A matrix
+#' 
+#' @noRd
+#'
+scale_rows <- function(adjM, x = NULL, k = NULL) {
+  if(!is.null(x) && !is.null(k)) {
+    row_scaling_values <- x * Matrix::rowSums(adjM)^(-k)
+  } else if(!is.null(x) && is.null(k)) {
+    row_scaling_values <- x
+  } else if(is.null(x) && !is.null(k)){
+    row_scaling_values <- Matrix::rowSums(adjM)^(-k)
+  } else stop("At least one of 'x' or 'k' must be non-null.")
+  # Ensure no NaN or Inf values (to handle division by zero)
+  row_scaling_values[!is.finite(row_scaling_values)] <- 0
+  # Scale rows
+  adjM@x <- adjM@x * row_scaling_values[adjM@i + 1]
+  return(Matrix::drop0(adjM))
 }
 
 
@@ -603,122 +626,168 @@ sum2one <- function(X, mode = "sparse", tol = 1e-12) {
 #' 
 #' @noRd
 #'
-normalize_adjmat <- function(adj_mat, norm, k, layers, brw_attr, network_hierarchy, crosstalk_params, level = 1, degree_bias, ...) {
-  if(level == max(V(network_hierarchy)$level)) { 
-    #=== BASE CASE ===#
-    # For each sibling set at bottom level:
-    #   normalize intra-layer adj mat
-    #   normalize inter-layer adj mat
-    #   apply crosstalk parameters to sibling sets
-    
-    sibs <- get_siblings(network_hierarchy, level)
-    
+normalize_adjmat <- function(adj_mat, norm, k, layers, brw_attr, network_hierarchy, crosstalk_params, degree_bias, in_parallel, n_cores) {
+  get_ancestors <- function(g, h_nodes, order = 1) {
+    uniq_h_nodes <- unique(h_nodes)
+    ids <- match(uniq_h_nodes, V(g)$name)
+    d <- igraph::distances(graph = g, v = ids, mode = "in")
+    ancestors <- apply(d, 1, function(x) names(x)[x == order])
+    ancestors <- ancestors[match(h_nodes, uniq_h_nodes)]
+    return(ancestors)
+  }
+  
+  max_level <- max(V(network_hierarchy)$level)
+  
+  # For each level
+  #   normalize intra-category adj mats (level == max_level only)
+  #   normalize inter-category adj mats
+  
+  all_rx_ids <- adj_mat@i + 1
+  all_cx_ids <- rep(1:adj_mat@Dim[2], diff(adj_mat@p))
+  
+  for(l in seq_len(max_level)) {
+    sibs <- get_siblings(network_hierarchy, l)
     for(s in seq_along(sibs)) {
-      # Normalize intra-layer and inter-layer adj mat
+      # Normalize inter-layer adj mat
       for(i in seq_along(sibs[[s]])) { # Row indices
-        r_ids <- which(layers == sibs[[s]][i])
+        r_ids <- which(layers %in% get_leaf_nodes(network_hierarchy, node = sibs[[s]][i]))
+        rx_ids <- which(all_rx_ids %in% r_ids)
         for(j in seq_along(sibs[[s]])) { # Column indices
-          c_ids <- which(layers == sibs[[s]][j])
+          if(i == j && l != max_level) next
+          c_ids <- which(layers %in% get_leaf_nodes(network_hierarchy, node = sibs[[s]][j]))
+          cx_ids <- which(all_cx_ids %in% c_ids)
           if(norm == "degree") {
-            adj_mat[r_ids, c_ids] <- sum2one(scale_rows(adj_mat[r_ids, c_ids, drop=FALSE], x = brw_attr[r_ids]))
+            adj_mat@x[intersect(rx_ids, cx_ids)] <- sum2one(scale_rows(adj_mat[r_ids, c_ids, drop=FALSE], x = brw_attr[r_ids]))@x
           } else if(norm == "modified_degree") {
-            adj_mat[r_ids, c_ids] <- sum2one(scale_rows(adjM = adj_mat[r_ids, c_ids, drop=FALSE], x = brw_attr[r_ids], k = k))
+            adj_mat@x[intersect(rx_ids, cx_ids)] <- sum2one(scale_rows(adjM = adj_mat[r_ids, c_ids, drop=FALSE], x = brw_attr[r_ids], k = k))@x
           } else stop("Unrecognized string for norm argument. Must be one of 'degree' or 'modified_degree'.")
           # Apply degree bias adjustment method
           if(!is.null(degree_bias)) {
-            if(i == j) {
+            if(i == j && l == max_level) {
               if(sibs[[s]][i] %in% get_leaf_nodes(network_hierarchy, node = degree_bias$layers)) {
-                adj_mat[r_ids, c_ids] <- bistochastic_scaling(adj_mat[r_ids, c_ids, drop=FALSE], gamma = degree_bias$gamma)
+                adj_mat@x[intersect(rx_ids, cx_ids)] <- bistochastic_scaling(adj_mat[r_ids, c_ids, drop=FALSE], gamma = degree_bias$gamma)@x
               }
             }
           }
         }
       }
-      
-      if(length(sibs[[s]]) > 1) {
-        # Apply crosstalk parameters
-        ids <- which(layers %in% sibs[[s]])
-        tmp_mat <- adj_mat[ids, ids, drop=FALSE]
-        tmp_layers <- extract_string(rownames(tmp_mat), "\\|", 2)
-        parents <- get_parents(g = network_hierarchy, h_nodes = tmp_layers)
-        loop_ids <- which(Matrix::colSums(tmp_mat) != 0)
-        for(i in loop_ids) {
-          x_ids <- (tmp_mat@p[i] + 1):tmp_mat@p[i+1] # IDs of @x for column i
-          current <- tmp_layers[i] # layer of node associated with column i
-          others <- tmp_layers[tmp_mat@i[x_ids] + 1] # Other layers that this node is connected to
-          if(all(others != current)) {
-            tmp_mat@x[x_ids] <- tmp_mat@x[x_ids] * (1 / length(unique(others)))
-            next
-          }
-          jump_prob <- (1 - crosstalk_params[parents[i]]) * prod(crosstalk_params[tmp_layers[i]])
-          n_interlayer_links <- sum(unique(others) != current)
-          if(n_interlayer_links == 0) {
-            next
-          } 
-          ctp <- ifelse(others == current, 1 - crosstalk_params[current], jump_prob / n_interlayer_links)
-          tmp_mat@x[x_ids] <- tmp_mat@x[x_ids] * ctp
-        }
-        
-        adj_mat[ids, ids] <- sum2one(tmp_mat)
-      }
     }
-    
-    return(adj_mat)
   }
   
-  #=== RECURSIVE CASE ===#
-  adj_mat <- normalize_adjmat(adj_mat = adj_mat, norm = norm, k = k, layers = layers, brw_attr = brw_attr, network_hierarchy = network_hierarchy, crosstalk_params = crosstalk_params, level = level + 1, degree_bias = degree_bias, ...)
+  tmp_layers <- extract_string(rownames(adj_mat), "\\|", 2)
+  lineages <- matrix("", nrow = length(unique(tmp_layers)), ncol = max_level + 1)
+  for(i in seq_len(ncol(lineages))) {
+    lineages[,i] <- get_ancestors(network_hierarchy, unique(tmp_layers), i-1)
+  }
   
-  # For each sibling set at current level:
-  #   normalize inter-unit sections of norm_adj_mat
-  #   apply crosstalk parameters to sibling sets in norm_adj_mat
-  
-  sibs <- get_siblings(network_hierarchy, level)
-  
-  for(s in seq_along(sibs)) {
-    # Normalize inter-layer adj mat
-    for(i in seq_along(sibs[[s]])) { # Row indices
-      r_ids <- which(layers %in% get_leaf_nodes(network_hierarchy, node = sibs[[s]][i]))
-      for(j in seq_along(sibs[[s]])) { # Column indices
-        if(i == j) next
-        c_ids <- which(layers %in% get_leaf_nodes(network_hierarchy, node = sibs[[s]][j]))
-        if(norm == "degree") {
-          adj_mat[r_ids, c_ids] <- sum2one(scale_rows(adj_mat[r_ids, c_ids, drop=FALSE], x = brw_attr[r_ids]))
-        } else if(norm == "modified_degree") {
-          adj_mat[r_ids, c_ids] <- sum2one(scale_rows(adjM = adj_mat[r_ids, c_ids, drop=FALSE], x = brw_attr[r_ids], k = k))
-        } else stop("Unrecognized string for norm argument. Must be one of 'degree' or 'modified_degree'.")
-      }
+  if(in_parallel) {
+    `%dopar%` <- get("%dopar%", asNamespace("foreach"))
+    if(is.null(n_cores)) n_cores <- round(parallel::detectCores() * 0.66)
+    cl <- parallel::makeForkCluster(n_cores, outfile = "")
+    on.exit(parallel::stopCluster(cl))
+    # if(!foreach::getDoParRegistered()) doParallel::registerDoParallel(cl)
+    if(foreach::getDoParRegistered()) {
+      doParallel::stopImplicitCluster()
+      foreach::registerDoSEQ()  # Reset to sequential backend
     }
-    
-    if(length(sibs[[s]]) > 1) {
-      # Apply crosstalk parameters
-      leaf_nodes <- get_leaf_nodes(network_hierarchy, node = sibs[[s]])
-      ids <- which(layers %in% leaf_nodes)
-      tmp_mat <- adj_mat[ids, ids, drop=FALSE]
-      tmp_layers <- extract_string(rownames(tmp_mat), "\\|", 2)
-      tmp_cats <- names(leaf_nodes)[match(tmp_layers, leaf_nodes)]
-      parents <- get_parents(g = network_hierarchy, h_nodes = tmp_cats)
-      offspring <- get_descendants(g = network_hierarchy, h_nodes = tmp_cats, leaves = tmp_layers)
-      loop_ids <- which(Matrix::colSums(tmp_mat) != 0)
-      for(i in loop_ids) {
-        x_ids <- (tmp_mat@p[i] + 1):tmp_mat@p[i+1] # IDs of @x for column i
-        current <- tmp_cats[i] # layer of node associated with column i
-        others <- tmp_cats[tmp_mat@i[x_ids] + 1] # Other layers that this node is connected to
-        if(all(others != current)) {
-          tmp_mat@x[x_ids] <- tmp_mat@x[x_ids] * (1 / length(unique(others)))
-          next
+    doParallel::registerDoParallel(cl)
+    # Accumulate and update
+    updates <- foreach::foreach(i = which(Matrix::colSums(adj_mat) != 0), .combine = rbind, .verbose = FALSE, .packages = c("Matrix"), .export = NULL, .noexport = NULL) %dopar% {
+      x_ids <- (adj_mat@p[i] + 1):adj_mat@p[i+1] # IDs of @x for column i
+      r_ids <- adj_mat@i[x_ids] + 1 # row ids of neighbors of node i
+      current <- lineages[match(tmp_layers[i], lineages[,1]),]
+      others <- lineages[match(tmp_layers[r_ids], lineages[,1]),,drop=FALSE]
+      
+      other_ids <- vector("list", max_level + 1)
+      link_status <- numeric(max_level + 1)
+      for(j in seq_along(other_ids)) {
+        if(j == 1) {
+          other_ids[[1]] <- which(others[,1] == current[1])
+        } else {
+          other_ids[[j]] <- which(others[,j-1] != current[j-1] & others[,j] == current[j])
         }
-        ctp_tmp <- ifelse(level == 1, 0, crosstalk_params[parents[i]])
-        jump_prob <- (1 - ctp_tmp) * prod(crosstalk_params[offspring[[i]]])
-        n_interlayer_links <- sum(unique(others) != current)
-        if(n_interlayer_links == 0) { # equivalent to all(others == current)
-          next
-        } 
-        ctp <- ifelse(others == current, 1, jump_prob / n_interlayer_links)
-        tmp_mat@x[x_ids] <- tmp_mat@x[x_ids] * ctp
+      }
+      link_status <- c(unlist(lapply(other_ids, function(x) length(x) > 0)), TRUE)
+      
+      ctp <- numeric(length(x_ids))
+      any_intra_flag <- FALSE
+      for(j in seq_along(other_ids)) {
+        if(link_status[j]) {
+          # "stay" term...
+          c_id <- which(link_status & seq_along(link_status) > j)[1] - 1
+          stay_prob <- 1 - crosstalk_params[current[c_id]]
+          
+          # "jump" term...
+          if(j == 1) {
+            ctp[other_ids[[j]]] <- stay_prob
+          } else {
+            if(any_intra_flag) {
+              tmp_id <- which(link_status & seq_along(link_status) < j)
+              tmp_num <- numeric(length(tmp_id))
+              for(l in seq_along(tmp_id)) {
+                c_id <- which(link_status & seq_along(link_status) > tmp_id[l])[1] - 1
+                tmp_num[l] <- crosstalk_params[current[c_id]]
+              }
+              jump_prob <- prod(tmp_num) / length(unique(others[other_ids[[j]], j-1]))
+            } else {
+              jump_prob <- 1 / length(unique(others[other_ids[[j]], j-1]))
+            }
+            ctp[other_ids[[j]]] <- stay_prob * jump_prob 
+          }
+          any_intra_flag <- TRUE
+        }
+      }
+      matrix(c(x_ids, ctp), ncol = 2)
+    }
+    adj_mat@x[updates[,1]] <- adj_mat@x[updates[,1]] * updates[,2]
+  } else {
+    for(i in which(Matrix::colSums(adj_mat) != 0)) {
+      x_ids <- (adj_mat@p[i] + 1):adj_mat@p[i+1] # IDs of @x for column i
+      r_ids <- adj_mat@i[x_ids] + 1 # row ids of neighbors of node i
+      current <- lineages[match(tmp_layers[i], lineages[,1]),]
+      others <- lineages[match(tmp_layers[r_ids], lineages[,1]),,drop=FALSE]
+      
+      other_ids <- vector("list", max_level + 1)
+      link_status <- numeric(max_level + 1)
+      for(j in seq_along(other_ids)) {
+        if(j == 1) {
+          other_ids[[1]] <- which(others[,1] == current[1])
+        } else {
+          other_ids[[j]] <- which(others[,j-1] != current[j-1] & others[,j] == current[j])
+        }
+      }
+      link_status <- c(unlist(lapply(other_ids, function(x) length(x) > 0)), TRUE)
+      
+      ctp <- numeric(length(x_ids))
+      any_intra_flag <- FALSE
+      for(j in seq_along(other_ids)) {
+        if(link_status[j]) {
+          # "stay" term...
+          c_id <- which(link_status & seq_along(link_status) > j)[1] - 1
+          stay_prob <- 1 - crosstalk_params[current[c_id]]
+          
+          # "jump" term...
+          if(j == 1) {
+            ctp[other_ids[[j]]] <- stay_prob
+          } else {
+            if(any_intra_flag) {
+              tmp_id <- which(link_status & seq_along(link_status) < j)
+              tmp_num <- numeric(length(tmp_id))
+              for(l in seq_along(tmp_id)) {
+                c_id <- which(link_status & seq_along(link_status) > tmp_id[l])[1] - 1
+                tmp_num[l] <- crosstalk_params[current[c_id]]
+              }
+              jump_prob <- prod(tmp_num) / length(unique(others[other_ids[[j]], j-1]))
+            } else {
+              jump_prob <- 1 / length(unique(others[other_ids[[j]], j-1]))
+            }
+            ctp[other_ids[[j]]] <- stay_prob * jump_prob 
+          }
+          any_intra_flag <- TRUE
+        }
       }
       
-      adj_mat[ids, ids] <- sum2one(tmp_mat)
+      adj_mat@x[x_ids] <- adj_mat@x[x_ids] * ctp
     }
   }
   
@@ -779,9 +848,7 @@ normalize_seeds <- function(seeds, layers, network_hierarchy, seed_weights, leve
       }
     }
   }
-  if(level == 1) {
-    seeds <- sum2one(seeds, mode = "dense")
-  }
+
   return(seeds)
 }
 
@@ -854,34 +921,6 @@ get_siblings <- function(g, level = "all") {
     }
   }
   return(sibs)
-}
-
-
-#' @title Scale rows of adjacency matrix
-#'
-#' @description Scale rows of adjacency matrix by `x`, or by row sums raised to the power `-k` (if `x` is NULL).
-#'
-#' @param adjM A sparse matrix of class dgCMatrix
-#' @param x numeric vector in same order as rows of `adjM`
-#' @param k non-negative number. Row sums will be raised to the power `-k` before row scaling.
-#'
-#' @returns A matrix
-#' 
-#' @noRd
-#'
-scale_rows <- function(adjM, x = NULL, k = NULL) {
-  if(!is.null(x) && !is.null(k)) {
-    row_scaling_values <- x * Matrix::rowSums(adjM)^(-k)
-  } else if(!is.null(x) && is.null(k)) {
-    row_scaling_values <- x
-  } else if(is.null(x) && !is.null(k)){
-    row_scaling_values <- Matrix::rowSums(adjM)^(-k)
-  } else stop("At least one of 'x' or 'k' must be non-null.")
-  # Ensure no NaN or Inf values (to handle division by zero)
-  row_scaling_values[!is.finite(row_scaling_values)] <- 0
-  # Scale rows
-  adjM@x <- adjM@x * row_scaling_values[adjM@i + 1]
-  return(Matrix::drop0(adjM))
 }
 
 
