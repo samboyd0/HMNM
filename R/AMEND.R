@@ -52,8 +52,11 @@
 #' @param verbose Logical. Whether to print information on algorithm progress.
 #' @param eta Numeric scalar or NULL (default). Starting filtering rate for AMEND algorithm. If NULL, this is set automatically to approximate the user-specified final module size _n_.
 #' 
-#' @return a named list with the following elements:
+#' @return a named list of additional class "AMENDresult", with the following elements:
 #' * module: igraph of the final module (i.e., subnetwork)
+#' * network: integrated network, from create_integrated_network()
+#' * hierarchy: hierachy for network, from create_network_hierarchy()
+#' * aggregated_network: aggregated network (only included when aggregate_layers is non-NULL)
 #' * score: final module score
 #' * subnetworks: a list of node names contained in intermediate subnetworks
 #' * stats: data.frame of network and algorithm statistics
@@ -150,7 +153,7 @@ module_identification <- function(network_layers, bipartite_networks = NULL, net
   #========================#
   # Create aggregated graph
   #========================#
-  # User will supply sets of layers, denoted by the corresponding leaf node names in hierarchy, which will be aggregated
+  # User will supply sets of layers, denoted by the corresponding leaf categories in hierarchy, which will be aggregated
   # Accepted input: NULL, list, or list of lists
   if(is.null(aggregate_layers)) {
     agg_graph <- create_aggregated_graph(graph = graph, agg_sets = NULL)
@@ -343,12 +346,25 @@ module_identification <- function(network_layers, bipartite_networks = NULL, net
   
   time <- Sys.time() - start_time
   
-  message("*** Converged! ***")
+  if(verbose) message("*** Converged! ***")
   
-  input_params <- list(n = n, normalize = normalize, k = k, FUN = FUN, FUN_params = FUN_params, directed = directed, 
-                       crosstalk_params = crosstalk_params, seed_weights = seed_weights, degree_bias = degree_bias, aggregate_layers)
+  if(BRW_NOI_FLAG) {
+    input_params <- list(n = n, normalize = normalize, k = k, FUN = FUN, FUN_params = FUN_params, directed = directed, 
+                         crosstalk_params = crosstalk_params, seed_weights = seed_weights, degree_bias = degree_bias, 
+                         aggregate_layers = aggregate_layers, BRW_NOI = brw_attr)
+  } else {
+    input_params <- list(n = n, normalize = normalize, k = k, FUN = FUN, FUN_params = FUN_params, directed = directed, 
+                         crosstalk_params = crosstalk_params, seed_weights = seed_weights, degree_bias = degree_bias, aggregate_layers = aggregate_layers)
+  }
   
-  return(list(module = best_sn, score = best_score, subnetworks = all_nets, stats = all_scores, time = time, input_params = input_params))
+  if(is.null(aggregate_layers)) {
+    res_obj <- list(module = best_sn, network = g_int$hierarchy, hierarchy = g_int$hierarchy, score = best_score, subnetworks = all_nets, stats = all_scores, time = time, input_params = input_params)
+  } else {
+    res_obj <- list(module = best_sn, network = g_int$hierarchy, hierarchy = g_int$hierarchy, aggregated_network = agg_graph, score = best_score, subnetworks = all_nets, stats = all_scores, time = time, input_params = input_params)
+  }
+  
+  class(res_obj) <- c("list", "AMENDresult")
+  return(res_obj)
 }
 
 
@@ -365,8 +381,7 @@ AMEND <- module_identification
 #' @details
 #' Since __AMEND__ iteratively filters out nodes to arrive at a final module, there are intermediate subnetworks associated with each iteration. A subnetwork at an earlier iteration contains the subnetworks of all later iterations. This function can be used to investigate these earlier subnetworks, for example, to identify when in the algorithm certain nodes were removed.
 #' 
-#' @param ig Input network
-#' @param amend_object Result from `module_identification()`
+#' @param amend_object Result from `module_identification()` or `AMEND()`
 #' @param k Iteration associated with the subnetwork you want to retrieve
 #'
 #' @returns igraph object of the subnetwork associated with the given iteration.
@@ -382,13 +397,19 @@ AMEND <- module_identification
 #' g <- create_integrated_network(network_layers = simple_network)
 #' 
 #' # Get the subnetwork from the end of the 4th iteration of the AMEND algorithm
-#' get_subnetwork(ig = g$network, amend_object = mod, k = 4)
+#' get_subnetwork(amend_object = mod, k = 4)
 #' 
 #' @export
 #' 
-get_subnetwork <- function(ig, amend_object, k) {
+get_subnetwork <- function(amend_object, k) {
+  if(!inherits(amend_object, "AMENDresult")) stop("'amend_object' must be an AMENDresult instance from AMEND()/module_identification().")
+  if(is.null(amend_object$input_params$aggregate_layers)) {
+    ig <- amend_object$network
+  } else {
+    ig <- amend_object$aggregated_network
+  }
   nodes <- amend_object$subnetworks[[k]]
-  igraph::induced_subgraph(ig, which(V(ig)$name %in% nodes))
+  return(igraph::induced_subgraph(ig, which(V(ig)$name %in% nodes)))
 }
 
 

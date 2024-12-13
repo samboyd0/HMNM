@@ -4,12 +4,10 @@
 \alias{get_subnetwork}
 \title{Get a larger subnetwork from previous iterations of the AMEND algorithm}
 \usage{
-get_subnetwork(ig, amend_object, k)
+get_subnetwork(amend_object, k)
 }
 \arguments{
-\item{ig}{Input network}
-
-\item{amend_object}{Result from \code{module_identification()}}
+\item{amend_object}{Result from \code{module_identification()} or \code{AMEND()}}
 
 \item{k}{Iteration associated with the subnetwork you want to retrieve}
 }
@@ -33,6 +31,6 @@ mod <- module_identification(network_layers = simple_network, n = 25)
 g <- create_integrated_network(network_layers = simple_network)
 
 # Get the subnetwork from the end of the 4th iteration of the AMEND algorithm
-get_subnetwork(ig = g$network, amend_object = mod, k = 4)
+get_subnetwork(amend_object = mod, k = 4)
 
 }

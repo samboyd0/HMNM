@@ -608,7 +608,7 @@ head(mod$subnetworks[[9]])
 #> "CIDm00000783|metadat" "CIDm00000961|metadat" "CIDm00000238|metadat" "CIDm00000929|metadat" "CIDm00169671|metadat" "CIDm00656491|metadat"
 
 # These nodes as an igraph object
-g_tmp <- get_subnetwork(ig = net$network, amend_object = mod, k = 9)
+g_tmp <- get_subnetwork(amend_object = mod, k = 9)
 table(V(g_tmp)$layer)
 #> 
 #>   metadat  metadat2 phosphdat   protdat  protdat2 

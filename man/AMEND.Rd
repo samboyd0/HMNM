@@ -64,9 +64,12 @@ AMEND(
 \item{eta}{Numeric scalar or NULL (default). Starting filtering rate for AMEND algorithm. If NULL, this is set automatically to approximate the user-specified final module size \emph{n}.}
 }
 \value{
-a named list with the following elements:
+a named list of additional class "AMENDresult", with the following elements:
 \itemize{
 \item module: igraph of the final module (i.e., subnetwork)
+\item network: integrated network, from create_integrated_network()
+\item hierarchy: hierachy for network, from create_network_hierarchy()
+\item aggregated_network: aggregated network (only included when aggregate_layers is non-NULL)
 \item score: final module score
 \item subnetworks: a list of node names contained in intermediate subnetworks
 \item stats: data.frame of network and algorithm statistics

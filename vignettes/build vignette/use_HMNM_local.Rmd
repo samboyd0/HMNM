@@ -551,7 +551,7 @@ Since the AMEND algorithm iteratively filters out nodes to arrive at a final mod
 head(mod$subnetworks[[9]])
 
 # These nodes as an igraph object
-g_tmp <- get_subnetwork(ig = net$network, amend_object = mod, k = 9)
+g_tmp <- get_subnetwork(amend_object = mod, k = 9)
 table(V(g_tmp)$layer)
 
 # When was protein ENSP00000229829 removed?
