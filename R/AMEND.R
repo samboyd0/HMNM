@@ -60,8 +60,6 @@
 #' * time: run time
 #' * input_params: list of input parameters
 #' 
-#' @aliases AMEND
-#' 
 #' @seealso [create_integrated_network()], [create_network_hierarchy], [transition_matrix()], [RWR()], [solve_MWCS()]
 #' 
 #' @examples
@@ -647,7 +645,7 @@ melt_graph <- function(g, agg_fun = NULL, directed) {
 restart_grid_search <- function(orig_net, agg_net, network_hierarchy, normalize, k, crosstalk_params, seed_weights, degree_bias, filtering_rate, agg_method = NULL, in_parallel = FALSE, n_cores, net_diam_prop, iteration = 1) {
   #=== Function Settings ===#
   FILTERING_RATE_DIFF <- 0.25
-  GRID_NET_SIZE <- 30000
+  GRID_NET_SIZE <- 100000
   #=========================#
   
   # Normalize adjacency matrix to get transition matrix
@@ -720,7 +718,12 @@ restart_grid_search <- function(orig_net, agg_net, network_hierarchy, normalize,
     if(is.null(n_cores)) n_cores <- round(parallel::detectCores() * 0.66)
     cl <- parallel::makeForkCluster(n_cores, outfile = "")
     on.exit(parallel::stopCluster(cl))
-    if(!foreach::getDoParRegistered()) doParallel::registerDoParallel(cl)
+    # if(!foreach::getDoParRegistered()) doParallel::registerDoParallel(cl)
+    if(foreach::getDoParRegistered()) {
+      doParallel::stopImplicitCluster()
+      foreach::registerDoSEQ()  # Reset to sequential backend
+    }
+    doParallel::registerDoParallel(cl)
     res <- foreach::foreach(i = seq_along(grid), .verbose = FALSE, .packages = c("igraph", "Matrix"), .export = NULL, .noexport = NULL) %dopar% {
       # RWR
       rwr_score <- RWR(tmat = tmat, seeds = seeds, restart = grid[i], seed_weights = seed_weights, 
@@ -816,7 +819,12 @@ network_connectivity_score = function(graphs, net_diam_prop = -1, in_parallel = 
     if(is.null(n_cores)) n_cores <- round(parallel::detectCores() * 0.66)
     cl <- parallel::makeForkCluster(n_cores, outfile = "")
     on.exit(parallel::stopCluster(cl))
-    if(!foreach::getDoParRegistered()) doParallel::registerDoParallel(cl)
+    # if(!foreach::getDoParRegistered()) doParallel::registerDoParallel(cl)
+    if(foreach::getDoParRegistered()) {
+      doParallel::stopImplicitCluster()
+      foreach::registerDoSEQ()  # Reset to sequential backend
+    }
+    doParallel::registerDoParallel(cl)
     c_val <- foreach::foreach(i = seq_along(graphs), .verbose = FALSE, .packages = c("igraph"), .export = NULL, .noexport = NULL) %dopar% {
       # Centrality measures
       if(net_diam_prop < 0) {
