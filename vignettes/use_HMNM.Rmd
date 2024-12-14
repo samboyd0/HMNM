@@ -143,10 +143,10 @@ rwr_scores <- RWR_pipeline(network_layers = ppi_el,
                            restart = 0.75,
                            output = "vector")
 #> Warning in create_integrated_network(network_layers = network_layers, bipartite_networks = bipartite_networks, : Integrated network is disconnected.
-head(rwr_scores)
+head(rwr_scores$scores)
 #> ENSP00000426909 ENSP00000309830 ENSP00000476136 ENSP00000340823 ENSP00000353408 ENSP00000496954 
 #>    0.0002818163    0.0001325023    0.0001114155    0.0001006727    0.0002994543    0.0001077099
-head(sort(rwr_scores, decreasing = TRUE))
+head(sort(rwr_scores$scores, decreasing = TRUE))
 #> ENSP00000478725 ENSP00000497642 ENSP00000291582 ENSP00000349116 ENSP00000355180 ENSP00000401888 
 #>    0.0011844230    0.0010711071    0.0010533525    0.0009894782    0.0009675007    0.0008178918
 ```

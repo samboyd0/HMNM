@@ -17,7 +17,11 @@
 #' @param node_specific_restart Logical. Whether to use node-specific restart probabilities based around __restart__ and inversely proportional to node coreness.
 #' @param output "list" for a list of RWR scores separated by network layer. "vector" for a single vector of all RWR scores.
 #'
-#' @return a numeric vector or a list of numeric vectors
+#' @return a list object of class 'RWRresult' with the following elements:
+#'  * scores: vector or list of RWR scores, depending on _output_ argument
+#'  * network: igraph of integrated network, of class 'HMNMgraph'
+#'  * hierarchy: igraph of network hierarchy, of class 'hierarchy'
+#'  * input_params: list of input parameters
 #'
 #' @examples
 #' # Attach igraph package
@@ -36,7 +40,7 @@
 #'                     FUN = function(x) abs(log(x)),
 #'                     restart = 0.75,
 #'                     output = "vector")
-#' head(res)
+#' head(res$scores)
 #' 
 #' 
 #' @seealso [create_integrated_network()], [create_network_hierarchy()], [transition_matrix()], [RWR()]
@@ -44,8 +48,10 @@
 #' @export
 #' 
 RWR_pipeline <- function(network_layers, bipartite_networks = NULL, network_hierarchy = NULL, data = NULL, FUN = NULL, FUN_params = NULL, directed = FALSE, brw_attr = NULL, lcc = FALSE,
-                         normalize = c("degree", "modified_degree"), k = 0.5, crosstalk_params = NULL, degree_bias = NULL, restart = 0.5, seed_weights = NULL, node_specific_restart = FALSE, output = c("list", "vector")) {
+                         normalize = c("degree", "modified_degree"), k = 0.5, crosstalk_params = NULL, degree_bias = NULL, restart = 0.5, seed_weights = NULL, node_specific_restart = FALSE, 
+                         output = c("list", "vector"), in_parallel = FALSE, n_cores = NULL) {
   output <- match.arg(output)
+  normalize <- match.arg(normalize)
   
   # Create integrated network
   g <- create_integrated_network(network_layers = network_layers,
@@ -64,7 +70,9 @@ RWR_pipeline <- function(network_layers, bipartite_networks = NULL, network_hier
                             normalize = normalize,
                             k = k,
                             crosstalk_params = crosstalk_params,
-                            degree_bias = degree_bias)
+                            degree_bias = degree_bias,
+                            in_parallel = in_parallel,
+                            n_cores = n_cores)
   
   # Run RWR
   seed_vals <- V(g$network)$seeds
@@ -82,13 +90,21 @@ RWR_pipeline <- function(network_layers, bipartite_networks = NULL, network_hier
       res[[i]] <- r[ids]
       names(res[[i]]) <- V(g$network)$original_name[ids]
     }
-    return(res)
-  } else {
+  } else if(output == "vector") {
     if(length(unique(V(g$network)$layer)) == 1) {
       names(r) <- V(g$network)$original_name
     }
-    return(r)
+    res <- r
   }
+  
+  input_params <- list(FUN = FUN, FUN_params = FUN_params, directed = directed, brw_attr = brw_attr, lcc = lcc, normalize = normalize, k = k,
+                       crosstalk_params = crosstalk_params, degree_bias = degree_bias, restart = restart, seed_weights = seed_weights, node_specific_restart = node_specific_restart)
+  
+  final_res <- list(scores = res, network = g$network, hierarchy = g$hierarchy, input_params = input_params)
+  
+  class(final_res) <- c("list", "RWRresult")
+  
+  return(final_res)
 }
 
 

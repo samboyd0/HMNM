@@ -21,7 +21,9 @@ RWR_pipeline(
   restart = 0.5,
   seed_weights = NULL,
   node_specific_restart = FALSE,
-  output = c("list", "vector")
+  output = c("list", "vector"),
+  in_parallel = FALSE,
+  n_cores = NULL
 )
 }
 \arguments{
@@ -56,9 +58,19 @@ RWR_pipeline(
 \item{node_specific_restart}{Logical. Whether to use node-specific restart probabilities based around \strong{restart} and inversely proportional to node coreness.}
 
 \item{output}{"list" for a list of RWR scores separated by network layer. "vector" for a single vector of all RWR scores.}
+
+\item{in_parallel}{Logical. Whether to run certain operations in parallel, using the \emph{parallel}, \emph{doParallel} and \emph{foreach} packages.}
+
+\item{n_cores}{Numeric scalar or NULL (default). Number of cores to use during parallel processing. If NULL and in_parallel=TRUE, defaults to two-thirds the number of cores detected on machine.}
 }
 \value{
-a numeric vector or a list of numeric vectors
+a list object of class 'RWRresult' with the following elements:
+\itemize{
+\item scores: vector or list of RWR scores, depending on \emph{output} argument
+\item network: igraph of integrated network, of class 'HMNMgraph'
+\item hierarchy: igraph of network hierarchy, of class 'hierarchy'
+\item input_params: list of input parameters
+}
 }
 \description{
 \code{RWR_pipeline()} takes as input a mono- or multi-layer network, constructs a transition matrix, and then performs RWR. Resulting node scores can be returned as a vector or a list with elements containing scores from each layer.
@@ -80,7 +92,7 @@ res <- RWR_pipeline(network_layers = simple_network,
                     FUN = function(x) abs(log(x)),
                     restart = 0.75,
                     output = "vector")
-head(res)
+head(res$scores)
 
 
 }

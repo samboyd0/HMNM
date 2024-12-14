@@ -222,8 +222,8 @@ rwr_scores <- RWR_pipeline(network_layers = ppi_el,
                            normalize = "degree",
                            restart = 0.75,
                            output = "vector")
-head(rwr_scores)
-head(sort(rwr_scores, decreasing = TRUE))
+head(rwr_scores$scores)
+head(sort(rwr_scores$scores, decreasing = TRUE))
 
 ```
 
