@@ -15,7 +15,7 @@ module_identification(
   FUN_params = NULL,
   directed = FALSE,
   aggregate_layers = NULL,
-  normalize = c("degree", "modified_degree"),
+  normalize = c("degree", "penalized_degree"),
   k = 0.5,
   degree_bias = NULL,
   crosstalk_params = NULL,
@@ -47,7 +47,7 @@ module_identification(
 
 \item{normalize}{Adjacency matrix normalization method to construct transition matrix.}
 
-\item{k}{Penalization factor for normalize="modified_degree". Must be non-negative, with larger values resulting in a greater penalty for node degree, in an effort to mitigate degree bias.}
+\item{k}{Penalization factor for normalize="penalized_degree". Must be non-negative, with larger values resulting in a greater penalty for node degree, in an effort to mitigate degree bias.}
 
 \item{degree_bias}{A character vector or list, or NULL (default). The character vector denotes the layers to which the degree bias mitigation method will be applied. The list must contain this character vector of layers (named 'layers') and a numeric scalar (named 'gamma') between 0 and 1 denoting the strength of degree bias mitigation. The default gamma value is 0.2. Set to NULL for no degree bias adjustment.}
 
@@ -108,7 +108,7 @@ Users can supply layers as separate network-like objects (igraph, adjacency matr
 
 Seed values for RWR are computed from \strong{data}, \strong{FUN}, and \strong{FUN_params}. Users can also supply node-wise values in \strong{brw_attr} for a biased random walk, where larger values will increase transition probabilities to nodes during RWR. The \strong{brw_attr} argument can also be a character vector of node names. Continuous values for biased random walk will be generated for each node as an inverse function of distance to the given nodes.
 
-Transition matrices can be created through classic column-normalization (\strong{normalize} = "degree") or through a modified column-normalization (\strong{normalize} = "modified_degree") which penalizes transitions to nodes as a function of node degree (to combat degree bias). See \code{\link[=transition_matrix]{transition_matrix()}} for more details on the transition matrix construction process.
+Transition matrices can be created through classic column-normalization (\strong{normalize} = "degree") or through a modified column-normalization (\strong{normalize} = "penalized_degree") which penalizes transitions to nodes as a function of node degree (to combat degree bias). See \code{\link[=transition_matrix]{transition_matrix()}} for more details on the transition matrix construction process.
 
 The \strong{degree_bias} argument can further mitigate degree bias by applying a degree bias adjustment method to specific layers in the network (see \code{\link[=bistochastic_scaling]{bistochastic_scaling()}}).
 }

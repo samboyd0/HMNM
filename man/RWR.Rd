@@ -66,7 +66,7 @@ g <- create_integrated_network(network_layers = simple_network,
 # Create transition matrix
 tmat <- transition_matrix(network = g$network,
                           network_hierarchy = g$hierarchy,
-                          normalize = "modified_degree",
+                          normalize = "penalized_degree",
                           k = 0.5)
                           
 # Run RWR

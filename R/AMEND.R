@@ -24,7 +24,7 @@
 #' 
 #' Seed values for RWR are computed from __data__, __FUN__, and __FUN_params__. Users can also supply node-wise values in __brw_attr__ for a biased random walk, where larger values will increase transition probabilities to nodes during RWR. The __brw_attr__ argument can also be a character vector of node names. Continuous values for biased random walk will be generated for each node as an inverse function of distance to the given nodes.
 #' 
-#' Transition matrices can be created through classic column-normalization (__normalize__ = "degree") or through a modified column-normalization (__normalize__ = "modified_degree") which penalizes transitions to nodes as a function of node degree (to combat degree bias). See [transition_matrix()] for more details on the transition matrix construction process. 
+#' Transition matrices can be created through classic column-normalization (__normalize__ = "degree") or through a modified column-normalization (__normalize__ = "penalized_degree") which penalizes transitions to nodes as a function of node degree (to combat degree bias). See [transition_matrix()] for more details on the transition matrix construction process. 
 #' 
 #' The __degree_bias__ argument can further mitigate degree bias by applying a degree bias adjustment method to specific layers in the network (see [bistochastic_scaling()]).
 #' 
@@ -111,7 +111,7 @@
 #' 
 module_identification <- function(network_layers, bipartite_networks = NULL, network_hierarchy = NULL, n = NULL, data = NULL, brw_attr = NULL,
                                   FUN = NULL, FUN_params = NULL, directed = FALSE, aggregate_layers = NULL,
-                                  normalize = c("degree", "modified_degree"), k = 0.5, degree_bias = NULL,
+                                  normalize = c("degree", "penalized_degree"), k = 0.5, degree_bias = NULL,
                                   crosstalk_params = NULL, seed_weights = NULL, verbose = FALSE, 
                                   in_parallel = FALSE, n_cores = NULL, eta = NULL){
   start_time <- Sys.time()

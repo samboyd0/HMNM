@@ -48,7 +48,7 @@
 #' @export
 #' 
 RWR_pipeline <- function(network_layers, bipartite_networks = NULL, network_hierarchy = NULL, data = NULL, FUN = NULL, FUN_params = NULL, directed = FALSE, brw_attr = NULL, lcc = FALSE,
-                         normalize = c("degree", "modified_degree"), k = 0.5, crosstalk_params = NULL, degree_bias = NULL, restart = 0.5, seed_weights = NULL, node_specific_restart = FALSE, 
+                         normalize = c("degree", "penalized_degree"), k = 0.5, crosstalk_params = NULL, degree_bias = NULL, restart = 0.5, seed_weights = NULL, node_specific_restart = FALSE, 
                          output = c("list", "vector"), in_parallel = FALSE, n_cores = NULL) {
   output <- match.arg(output)
   normalize <- match.arg(normalize)
@@ -155,7 +155,7 @@ RWR_pipeline <- function(network_layers, bipartite_networks = NULL, network_hier
 #' # Create transition matrix
 #' tmat <- transition_matrix(network = g$network,
 #'                           network_hierarchy = g$hierarchy,
-#'                           normalize = "modified_degree",
+#'                           normalize = "penalized_degree",
 #'                           k = 0.5)
 #'                           
 #' # Run RWR
@@ -299,7 +299,7 @@ RWR <- function(tmat, seeds = NULL, seed_weights = NULL, restart = 0.5, network_
 #' 
 #' Values in __crosstalk_params__ represent the probability of the random walker to jump from a layer of the specified category to layers of other categories in the same sibling set of the hierarchy. The network hierarchy is used such that it is easier for information to spread between layers that lie closer together in the hierarchy.
 #' 
-#' For normalize="modified_degree", the adjacency matrix is first transformed by `D^(-k) %*% A`, where `A` is an adjacency matrix, `D` is a diagonal matrix of columns sums of `A`, and `k` is a penalization factor. This transformed matrix is then column-normalized to get a transition matrix. This is equivalent to a biased random walk which penalizes transitions to nodes as a function of node degree, with penalization factor _k_ controlling the strength of this inverse relationship.
+#' For normalize="penalized_degree", the adjacency matrix is first transformed by `D^(-k) %*% A`, where `A` is an adjacency matrix, `D` is a diagonal matrix of columns sums of `A`, and `k` is a penalization factor. This transformed matrix is then column-normalized to get a transition matrix. This is equivalent to a biased random walk which penalizes transitions to nodes as a function of node degree, with penalization factor _k_ controlling the strength of this inverse relationship.
 #' 
 #' The __degree_bias__ argument can mitigate degree bias by applying a degree bias adjustment method to specific layers in the network (see [bistochastic_scaling()]).
 #' 
@@ -307,7 +307,7 @@ RWR <- function(tmat, seeds = NULL, seed_weights = NULL, restart = 0.5, network_
 #' @param network igraph object of class 'HMNMgraph' as a result from `create_integrated_network()`.
 #' @param network_hierarchy igraph object of class 'hierarchy' as a result from `create_network_hierarchy()`.
 #' @param normalize Adjacency matrix normalization method to construct transition matrix.
-#' @param k Penalization factor for normalize="modified_degree". Must be non-negative, with larger values resulting in a greater penalty for node degree, in an effort to mitigate degree bias.
+#' @param k Penalization factor for normalize="penalized_degree". Must be non-negative, with larger values resulting in a greater penalty for node degree, in an effort to mitigate degree bias.
 #' @param crosstalk_params A named numeric vector containing the crosstalk parameters for each category in network hierarchy. If NULL (default), a uniform value of 0.5 is set. Hierarchicy categories not given in _crosstalk_params_ will be given this default value of 0.5.
 #' @param degree_bias A character vector or list, or NULL (default). The character vector denotes the layers to which the degree bias mitigation method will be applied. The list must contain this character vector of layers (named 'layers') and a numeric scalar (named 'gamma') between 0 and 1 denoting the strength of degree bias mitigation. The default gamma value is 0.2. Set to NULL for no degree bias adjustment.
 #' 
@@ -325,12 +325,12 @@ RWR <- function(tmat, seeds = NULL, seed_weights = NULL, restart = 0.5, network_
 #' # Create transition matrix
 #' tmat <- transition_matrix(network = g$network,
 #'                           network_hierarchy = g$hierarchy,
-#'                           normalize = "modified_degree",
+#'                           normalize = "penalized_degree",
 #'                           k = 0.5)
 #' 
 #' @export
 #' 
-transition_matrix <- function(network, network_hierarchy, normalize = c("degree", "modified_degree"), k = 0.5,
+transition_matrix <- function(network, network_hierarchy, normalize = c("degree", "penalized_degree"), k = 0.5,
                               crosstalk_params = NULL, degree_bias = NULL, in_parallel = FALSE, n_cores = NULL) {
   #=== Function Settings ===#
   DEFAULT_CROSSTALK <- 0.5
@@ -428,7 +428,7 @@ transition_matrix <- function(network, network_hierarchy, normalize = c("degree"
 #' # Create transition matrix
 #' tmat <- transition_matrix(network = g$network,
 #'                           network_hierarchy = g$hierarchy,
-#'                           normalize = "modified_degree",
+#'                           normalize = "penalized_degree",
 #'                           k = 0.5)
 #'                           
 #' tmat2 <- bistochastic_scaling(tmat = tmat, gamma = 1)
@@ -664,9 +664,9 @@ normalize_adjmat <- function(adj_mat, norm, k, layers, brw_attr, network_hierarc
           cx_ids <- which(all_cx_ids %in% c_ids)
           if(norm == "degree") {
             adj_mat@x[intersect(rx_ids, cx_ids)] <- sum2one(scale_rows(adj_mat[r_ids, c_ids, drop=FALSE], x = brw_attr[r_ids]))@x
-          } else if(norm == "modified_degree") {
+          } else if(norm == "penalized_degree") {
             adj_mat@x[intersect(rx_ids, cx_ids)] <- sum2one(scale_rows(adjM = adj_mat[r_ids, c_ids, drop=FALSE], x = brw_attr[r_ids], k = k))@x
-          } else stop("Unrecognized string for norm argument. Must be one of 'degree' or 'modified_degree'.")
+          } else stop("Unrecognized string for norm argument. Must be one of 'degree' or 'penalized_degree'.")
           # Apply degree bias adjustment method
           if(!is.null(degree_bias)) {
             if(i == j && l == max_level) {

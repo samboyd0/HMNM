@@ -7,7 +7,7 @@
 transition_matrix(
   network,
   network_hierarchy,
-  normalize = c("degree", "modified_degree"),
+  normalize = c("degree", "penalized_degree"),
   k = 0.5,
   crosstalk_params = NULL,
   degree_bias = NULL,
@@ -22,7 +22,7 @@ transition_matrix(
 
 \item{normalize}{Adjacency matrix normalization method to construct transition matrix.}
 
-\item{k}{Penalization factor for normalize="modified_degree". Must be non-negative, with larger values resulting in a greater penalty for node degree, in an effort to mitigate degree bias.}
+\item{k}{Penalization factor for normalize="penalized_degree". Must be non-negative, with larger values resulting in a greater penalty for node degree, in an effort to mitigate degree bias.}
 
 \item{crosstalk_params}{A named numeric vector containing the crosstalk parameters for each category in network hierarchy. If NULL (default), a uniform value of 0.5 is set. Hierarchicy categories not given in \emph{crosstalk_params} will be given this default value of 0.5.}
 
@@ -43,7 +43,7 @@ Constructs a transition matrix from a given network and network hierarchy. There
 
 Values in \strong{crosstalk_params} represent the probability of the random walker to jump from a layer of the specified category to layers of other categories in the same sibling set of the hierarchy. The network hierarchy is used such that it is easier for information to spread between layers that lie closer together in the hierarchy.
 
-For normalize="modified_degree", the adjacency matrix is first transformed by \code{D^(-k) \%*\% A}, where \code{A} is an adjacency matrix, \code{D} is a diagonal matrix of columns sums of \code{A}, and \code{k} is a penalization factor. This transformed matrix is then column-normalized to get a transition matrix. This is equivalent to a biased random walk which penalizes transitions to nodes as a function of node degree, with penalization factor \emph{k} controlling the strength of this inverse relationship.
+For normalize="penalized_degree", the adjacency matrix is first transformed by \code{D^(-k) \%*\% A}, where \code{A} is an adjacency matrix, \code{D} is a diagonal matrix of columns sums of \code{A}, and \code{k} is a penalization factor. This transformed matrix is then column-normalized to get a transition matrix. This is equivalent to a biased random walk which penalizes transitions to nodes as a function of node degree, with penalization factor \emph{k} controlling the strength of this inverse relationship.
 
 The \strong{degree_bias} argument can mitigate degree bias by applying a degree bias adjustment method to specific layers in the network (see \code{\link[=bistochastic_scaling]{bistochastic_scaling()}}).
 }
@@ -57,7 +57,7 @@ g <- create_integrated_network(network_layers = simple_network)
 # Create transition matrix
 tmat <- transition_matrix(network = g$network,
                           network_hierarchy = g$hierarchy,
-                          normalize = "modified_degree",
+                          normalize = "penalized_degree",
                           k = 0.5)
 
 }

@@ -14,7 +14,7 @@ RWR_pipeline(
   directed = FALSE,
   brw_attr = NULL,
   lcc = FALSE,
-  normalize = c("degree", "modified_degree"),
+  normalize = c("degree", "penalized_degree"),
   k = 0.5,
   crosstalk_params = NULL,
   degree_bias = NULL,
@@ -45,7 +45,7 @@ RWR_pipeline(
 
 \item{normalize}{Adjacency matrix normalization method to construct transition matrix.}
 
-\item{k}{Penalization factor for normalize="modified_degree". Must be non-negative, with larger values resulting in a greater penalty for node degree, in an effort to mitigate degree bias.}
+\item{k}{Penalization factor for normalize="penalized_degree". Must be non-negative, with larger values resulting in a greater penalty for node degree, in an effort to mitigate degree bias.}
 
 \item{crosstalk_params}{A named numeric vector containing the crosstalk parameters for each category in network hierarchy. If NULL (default), a uniform value of 0.5 is set. Hierarchicy categories not given in \emph{crosstalk_params} will be given this default value of 0.5.}
 
