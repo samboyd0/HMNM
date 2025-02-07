@@ -1,7 +1,6 @@
 #' @importFrom igraph vcount V V<- E E<- vertex_attr vertex_attr<-
 #' @importFrom stats sd quantile
 
-
 #' @title Identify modules from a network
 #' 
 #' @description 
@@ -176,7 +175,13 @@ module_identification <- function(network_layers, bipartite_networks = NULL, net
     
     aggregate_layers <- lapply(aggregate_layers, unique)
     aggregate_layers <- aggregate_layers[unlist(lapply(aggregate_layers, length)) > 1]
-    names(aggregate_layers) <- paste0("agg", seq_along(aggregate_layers))
+    if(is.null(names(aggregate_layers))) {
+      names(aggregate_layers) <- paste0("agg", seq_along(aggregate_layers))
+    } else if(any(names(aggregate_layers) == "")) {
+      ids <- which(names(aggregate_layers) == "")
+      names(aggregate_layers)[ids] <- paste0("agg", seq_along(ids))
+    }
+    
     
     # Verifying that sets of layers to aggregate have no overlap
     tmp <- NULL
@@ -184,7 +189,7 @@ module_identification <- function(network_layers, bipartite_networks = NULL, net
       if(i == 1) {
         tmp <- c(tmp, aggregate_layers[[i]])
       } else {
-        if(any(aggregate_layers[[i]] %in% tmp)) stop("For 'aggregate_layers', different sets of layers to aggregate cannot be overlapping.")
+        if(any(aggregate_layers[[i]] %in% tmp)) stop("For 'aggregate_layers', different sets of layers to aggregate cannot have common layers.")
         tmp <- c(tmp, aggregate_layers[[i]])
       }
     }
@@ -358,9 +363,9 @@ module_identification <- function(network_layers, bipartite_networks = NULL, net
   }
   
   if(is.null(aggregate_layers)) {
-    res_obj <- list(module = best_sn, network = g_int$hierarchy, hierarchy = g_int$hierarchy, score = best_score, subnetworks = all_nets, stats = all_scores, time = time, input_params = input_params)
+    res_obj <- list(module = best_sn, network = g_int$network, hierarchy = g_int$hierarchy, score = best_score, subnetworks = all_nets, stats = all_scores, time = time, input_params = input_params)
   } else {
-    res_obj <- list(module = best_sn, network = g_int$hierarchy, hierarchy = g_int$hierarchy, aggregated_network = agg_graph, score = best_score, subnetworks = all_nets, stats = all_scores, time = time, input_params = input_params)
+    res_obj <- list(module = best_sn, network = g_int$network, hierarchy = g_int$hierarchy, aggregated_network = agg_graph, score = best_score, subnetworks = all_nets, stats = all_scores, time = time, input_params = input_params)
   }
   
   class(res_obj) <- c("list", "AMENDresult")
@@ -371,6 +376,27 @@ module_identification <- function(network_layers, bipartite_networks = NULL, net
 #' @inherit module_identification
 #' @export
 AMEND <- module_identification
+
+
+#' @title Print method for AMENDresult object
+#' @description Prints AMENDresult object
+#' @param x AMENDresult object
+#' @method print AMENDresult
+#' @export
+#' @noRd
+print.AMENDresult <- function(x, ...) {
+  cat("#\n# Active Module Identification with AMEND\n#\n")
+  cat("#...Active module\n")
+  print(x$module)
+  cat("#\n#...Integrated network\n")
+  print(x$network)
+  if("aggregated_network" %in% names(x)) {
+    cat("#\n#...Aggregated network\n")
+    print(x$aggregated_network)
+  }
+  cat("#\n#...Hierarchy\n")
+  print(x$hierarchy)
+}
 
 
 #' @title Get a larger subnetwork from previous iterations of the AMEND algorithm
