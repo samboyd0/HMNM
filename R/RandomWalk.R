@@ -633,8 +633,6 @@ scale_rows <- function(adjM, x = NULL, k = NULL) {
 #'
 #' @description `normalize_adjmat()` efficiently constructs a transition matrix from an adjacency matrix whose nodes are categorized by a hierarchy. 
 #'
-#' @details This is a recursive function.
-#'
 #' @param adj_mat an adjacency matrix. Should of class dgCMatrix.
 #' @param layers vector of all layer names in same order as rows of adj_mat.
 #'
@@ -643,14 +641,6 @@ scale_rows <- function(adjM, x = NULL, k = NULL) {
 #' @noRd
 #'
 normalize_adjmat <- function(adj_mat, norm, k, layers, brw_attr, network_hierarchy, crosstalk_params, degree_bias, in_parallel, n_cores) {
-  get_ancestors <- function(g, h_nodes, order = 1) {
-    uniq_h_nodes <- unique(h_nodes)
-    ids <- match(uniq_h_nodes, V(g)$name)
-    d <- igraph::distances(graph = g, v = ids, mode = "in")
-    ancestors <- apply(d, 1, function(x) names(x)[x == order])
-    ancestors <- ancestors[match(h_nodes, uniq_h_nodes)]
-    return(ancestors)
-  }
   
   max_level <- max(V(network_hierarchy)$level)
   
@@ -894,6 +884,17 @@ get_descendants <- function(g, h_nodes, leaves) {
   }
   res <- unname(tmp[match(comb, uniq_comb)])
   return(res)
+}
+
+
+# Get the ancestors of categories (h_nodes) in a network hierarchy (g) at a given distance from query nodes (order)
+get_ancestors <- function(g, h_nodes, order = 1) {
+  uniq_h_nodes <- unique(h_nodes)
+  ids <- match(uniq_h_nodes, V(g)$name)
+  d <- igraph::distances(graph = g, v = ids, mode = "in")
+  ancestors <- apply(d, 1, function(x) names(x)[x == order])
+  ancestors <- ancestors[match(h_nodes, uniq_h_nodes)]
+  return(ancestors)
 }
 
 
