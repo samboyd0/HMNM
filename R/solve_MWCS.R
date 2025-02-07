@@ -202,9 +202,9 @@ solve_MWCS <- function(ig, scores, min_cluster_size = 2) {
       class(subgraph) <- original_classes
       return(subgraph)
     } else {
-      subg <- igraph::induced_subgraph(sub_mig, neg_node_ids2) # 'linker' graph(s)
-      if(!igraph::is_connected(subg, mode = "weak")) {
-        clust <- igraph::components(subg, mode = "weak")
+      linker_graph <- igraph::induced_subgraph(sub_mig, neg_node_ids2) # 'linker' graph(s)
+      if(!igraph::is_connected(linker_graph, mode = "weak")) {
+        clust <- igraph::components(linker_graph, mode = "weak")
         max_cluster_size <- max(clust$csize)
         min_cluster_size <- min(min_cluster_size, max_cluster_size)
         clust_ids <- which(clust$csize >= min_cluster_size)
@@ -216,17 +216,17 @@ solve_MWCS <- function(ig, scores, min_cluster_size = 2) {
         }
         subgraph_list <- vector("list", length(clust_ids))
         for(j in seq_along(clust_ids)) {
-          subg_tmp <- igraph::induced_subgraph(subg, which(clust$membership == clust_ids[j]))
-          if(!igraph::is_simple(subg_tmp)) subg_tmp <- igraph::simplify(subg_tmp)
-          mst_subg_tmp <- igraph::mst(subg_tmp, E(subg_tmp)$weight) # MST of linker graph
+          linker_graph_tmp <- igraph::induced_subgraph(linker_graph, which(clust$membership == clust_ids[j]))
+          if(!igraph::is_simple(linker_graph_tmp)) linker_graph_tmp <- igraph::simplify(linker_graph_tmp)
+          mst_linker_graph_tmp <- igraph::mst(linker_graph_tmp, E(linker_graph_tmp)$weight) # MST of linker graph
           # Find highest scoring path (by vertex weights) in the linker MST plus attached meta-nodes (Step vii in function documentation)
           max_score <- 0
-          mst_subg_score_tmp <- igraph::vertex_attr(mst_subg_tmp, van)
-          mst_subg_clust_tmp <- V(mst_subg_tmp)$clusters
+          mst_linker_graph_score_tmp <- igraph::vertex_attr(mst_linker_graph_tmp, van)
+          mst_linker_graph_clust_tmp <- V(mst_linker_graph_tmp)$clusters
           sub_mig_score_tmp <- igraph::vertex_attr(sub_mig, van)
-          for(i in seq_len(vcount(mst_subg_tmp))) {
-            path <- igraph::all_shortest_paths(mst_subg_tmp, from = V(mst_subg_tmp)[i], mode = "all")
-            path_score <- unlist(lapply(path$res, getPathScore, g1_score = mst_subg_score_tmp, g1_clust = mst_subg_clust_tmp, g2_score = sub_mig_score_tmp))
+          for(i in seq_len(vcount(mst_linker_graph_tmp))) {
+            path <- igraph::all_shortest_paths(mst_linker_graph_tmp, from = V(mst_linker_graph_tmp)[i], mode = "all")
+            path_score <- unlist(lapply(path$res, getPathScore, g1_score = mst_linker_graph_score_tmp, g1_clust = mst_linker_graph_clust_tmp, g2_score = sub_mig_score_tmp))
             best_pos <- which.max(path_score)
             if(path_score[[best_pos]] > max_score) {
               best_path <- path$res[[best_pos]]
@@ -234,7 +234,7 @@ solve_MWCS <- function(ig, scores, min_cluster_size = 2) {
             }
           }
           if(length(best_path) != 1) {
-            cluster_list <- V(mst_subg_tmp)[best_path]$clusters
+            cluster_list <- V(mst_linker_graph_tmp)[best_path]$clusters
             names_list <- as.character(seq_along(cluster_list))
             names(cluster_list) <- names_list
             names(best_path) <- names_list
@@ -252,11 +252,11 @@ solve_MWCS <- function(ig, scores, min_cluster_size = 2) {
           }
           # Induce a subgraph from input graph containing only
           #   nodes along this best path and edges between them
-          pos_cluster <- V(sub_mig)[unique(unlist(V(mst_subg_tmp)[best_path]$clusters))]$name
+          pos_cluster <- V(sub_mig)[unique(unlist(V(mst_linker_graph_tmp)[best_path]$clusters))]$name
           tmp <- unlist(strsplit(pos_cluster, "cluster"))
           ttmp <- as.numeric(matrix(tmp, nrow = 2)[2, ])
           tmp_meta_nodes <- unlist(lapply(conn_comp_graph, igraph::vertex_attr, "name")[ttmp])
-          tmp_border_nodes <- V(mst_subg_tmp)[best_path]$name
+          tmp_border_nodes <- V(mst_linker_graph_tmp)[best_path]$name
           tmp_nodes <- c(tmp_border_nodes, tmp_meta_nodes)
           subgraph <- igraph::induced_subgraph(ig, vids = tmp_nodes)
           subgraph <- largest_connected_component(subgraph)
@@ -267,6 +267,10 @@ solve_MWCS <- function(ig, scores, min_cluster_size = 2) {
           subgraph_list[[j]] <- subgraph
         }
         subgraph_list <- subgraph_list[order(unlist(lapply(subgraph_list, function(x) sum(igraph::vertex_attr(x, van)))), decreasing = TRUE)] # graphs are in descending order by sum of scores
+        # IDEA (1.9.25): Somehow merge subgraphs in 'subgraph_list' that share nodes and that give a better net score than any individual subgraph.
+        #   - Subgraphs will only have meta nodes in common.
+        #   - For each pair, start with the highest scoring subgraph and see if merging with the other gives a higher score
+        #   - If yes, merge them. If no, move to the next pair.
         g_tmp <- subgraph_list[[1]]
         score_tmp <- sum(igraph::vertex_attr(subgraph_list[[1]], van))
         ll <- ifelse(length(subgraph_list) > 1, 2, 1)
@@ -288,8 +292,8 @@ solve_MWCS <- function(ig, scores, min_cluster_size = 2) {
         class(g_tmp) <- original_classes
         return(g_tmp)
       } else {
-        if(!igraph::is_simple(subg)) subg <- igraph::simplify(subg)
-        mst_subg <- igraph::mst(subg, E(subg)$weight) # MST of linker graph
+        if(!igraph::is_simple(linker_graph)) linker_graph <- igraph::simplify(linker_graph)
+        mst_linker_graph <- igraph::mst(linker_graph, E(linker_graph)$weight) # MST of linker graph
         getPathScore <- function(path, g1_score, g1_clust, g2_score) {
           s1 <- g1_score[path] # scores from a path in the MST linker graph
           tmp <- unique(unlist(g1_clust[path])) # meta nodes that linker nodes along 'path' are connected to
@@ -298,12 +302,12 @@ solve_MWCS <- function(ig, scores, min_cluster_size = 2) {
         }
         # Find highest scoring path (by vertex weights) in the linker MST plus attached meta-nodes (Step vii in dNetFind function documentation)
         max_score <- 0
-        mst_subg_score_tmp <- igraph::vertex_attr(mst_subg, van)
-        mst_subg_clust_tmp <- V(mst_subg)$clusters
+        mst_linker_graph_score_tmp <- igraph::vertex_attr(mst_linker_graph, van)
+        mst_linker_graph_clust_tmp <- V(mst_linker_graph)$clusters
         sub_mig_score_tmp <- igraph::vertex_attr(sub_mig, van)
-        for(i in seq_len(vcount(mst_subg))) {
-          path <- igraph::all_shortest_paths(mst_subg, from = V(mst_subg)[i], mode = "all")
-          path_score <- unlist(lapply(path$res, getPathScore, g1_score = mst_subg_score_tmp, g1_clust = mst_subg_clust_tmp, g2_score = sub_mig_score_tmp))
+        for(i in seq_len(vcount(mst_linker_graph))) {
+          path <- igraph::all_shortest_paths(mst_linker_graph, from = V(mst_linker_graph)[i], mode = "all")
+          path_score <- unlist(lapply(path$res, getPathScore, g1_score = mst_linker_graph_score_tmp, g1_clust = mst_linker_graph_clust_tmp, g2_score = sub_mig_score_tmp))
           best_pos <- which.max(path_score)
           if(path_score[[best_pos]] > max_score){
             best_path <- path$res[[best_pos]]
@@ -311,7 +315,7 @@ solve_MWCS <- function(ig, scores, min_cluster_size = 2) {
           }
         }
         if(length(best_path) != 1) {
-          cluster_list <- V(mst_subg)[best_path]$clusters
+          cluster_list <- V(mst_linker_graph)[best_path]$clusters
           names_list <- as.character(1:length(cluster_list))
           names(cluster_list) <- names_list
           names(best_path) <- names_list
@@ -329,11 +333,11 @@ solve_MWCS <- function(ig, scores, min_cluster_size = 2) {
         }
         # Induce a subgraph from input graph containing only
         #   nodes along this best path and edges between them
-        pos_cluster <- V(sub_mig)[unique(unlist(V(mst_subg)[best_path]$clusters))]$name
+        pos_cluster <- V(sub_mig)[unique(unlist(V(mst_linker_graph)[best_path]$clusters))]$name
         tmp <- unlist(strsplit(pos_cluster, "cluster"))
         ttmp <- as.numeric(matrix(tmp, nrow = 2)[2, ])
         tmp_meta_nodes <- unlist(lapply(conn_comp_graph, igraph::vertex_attr, "name")[ttmp])
-        tmp_border_nodes <- V(mst_subg)[best_path]$name
+        tmp_border_nodes <- V(mst_linker_graph)[best_path]$name
         tmp_nodes <- c(tmp_border_nodes, tmp_meta_nodes)
         subgraph <- igraph::induced_subgraph(ig, vids = tmp_nodes)
         type <- rep("desired", vcount(subgraph))
