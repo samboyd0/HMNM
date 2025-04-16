@@ -893,7 +893,11 @@ connect_common_nodes <- function(layers, network_layers, network_hierarchy) {
   
   common_nodes <- intersect(layer_node[[1]], layer_node[[2]])
   
-  if(length(common_nodes) == 0) stop("Cannot connect common nodes between non-overlapping layers: ", paste(layers, collapse = ", "), ".")
+  # if(length(common_nodes) == 0) stop("Cannot connect common nodes between non-overlapping layers: ", paste(layers, collapse = ", "), ".")
+  if(length(common_nodes) == 0) {
+    warning("Cannot connect common nodes between non-overlapping layers: ", paste(layers, collapse = ", "), ".")
+    return(NULL)
+  }
   
   if(igraph::is_directed(layer_net[[1]])) {
     el <- matrix(c(paste(common_nodes, layers[1], sep = "|"),
