@@ -31,13 +31,55 @@
 # common supported keytypes for GO: ENTREZID, ENSEMBL, ENSEMBLPROT, ENSEMBLTRANS, REFSEQ, SYMBOL, UNIGENE, UNIPROT... and many others
 #   See ?AnnotationDbi::ACCNUM
 
-# IDEA (1/24/25): Be able to jointly analyze node sets of different molecules (i.e., different keyTypes). Currently unable to.
-# https://bioconductor.org/packages/release/bioc/html/multiGSEA.html
+
+# *** IDEA *** (1/24/25): Be able to jointly analyze node sets of different molecules (i.e., different keyTypes). Currently unable to.
+# This is a critical need, since there are databases like KEGG & Reactome that have annotations containing genes/proteins and metabolites.
+# To do this, I cannot rely on clusterProfiler. Perhaps borrow from multiGSEA.
+# Resources: 
+#   multiGSEA package: https://bioconductor.org/packages/release/bioc/html/multiGSEA.html
+#   metaboliteIDmapping package: https://bioconductor.org/packages/release/data/annotation/html/metaboliteIDmapping.html
+
+# Goal: To provide pathway analysis capabilites that are as general as possible-in terms of annotation databases & terms, ID mapping, and enrichment method- but at the same time takes advantage of already-existing packages.
+# Potentially Useful Packages: clusterProfiler, multiGSEA, metaboliteIDmapping, fgsea
+# Maybe move away from clusterProfiler code and rely instead on multiGSEA, metaboliteIDmapping, graphite, and fgsea....
 
 # IDEA (2/7/25): Allow users to specify the node attribute of the network to use as node IDs, since the function as-is might not be able to perform the mapping the user needs. 
 # So the user can perform the necessary mapping prior to pathway_analysis() and then specify the node attribute which stores those node IDs to be used
 # Currently the function only accesses 'original_name' vertex attribute.
 
+#=== Preliminary Steps ===#
+# 1. Define the acceptable ontologies (e.g., KEGG, GO, Reactome)
+# 2. Be able to access these ontologies
+# 3. Determine which organism are valid for each ontology
+# 4. Define the acceptable organisms (based on these ontologies)
+# 5. Determine the keytypes present in each ontology
+# 6. Categorize these keytypes into keyclasses
+# 7. Choose mapping databases (e.g., AnnotationDbi, metaboliteIDmapping)
+# 8. From the chosen mapping databases, determine acceptable keytypes
+# 9. Categorize these keytypes into keyclasses
+
+#=== Steps for Pathway Analysis ===#
+## [User]
+# 1. Define layer sets to analyze (layer set = set of layer(s) to jointly analyze)
+# 2. Define the organism and ontology for each layer set
+# 3. Define keytypes for each individual layer in each layer set
+## [Code]
+# For each layer set...
+# 1. Access the specified ontology
+# 2. Determine keytypes and keyclasses contained in ontology terms
+# 3. For each layer in the set... 
+#   3.a. Determine mapping database to use based on the layer keytype (and ontology keytype?)
+#   3.b. Determine the ontology keytype to map layer keytype to based on the keyclasses of layer and ontology keytypes
+#   3.c. Map from layer keytype to appropriate ontology keytype
+#     NB: For ORA, this mapping must be done for the full network and the module.
+# 4. For each term in ontology, concatenate IDs from different keyclasses into a single vector
+# 5. Concatenate IDs from different layers within a layer set together into a single vector
+# 6. For each layer set, perform pathway analysis (ORA or GSEA) using fgsea package
+
+
+
+#=========================================================#
+#=========================================================#
 
 #' @title Internal function for pathway analysis
 #'
@@ -171,7 +213,7 @@ pathway_analysis_internal <- function(x, db = c("GO", "KEGG", "MKEGG", "Reactome
     
   } else if(is.matrix(x) && is.numeric(x)) {
     method <- "GSEA"
-    nodeList <- vector("list", ncol = ncol(x))
+    nodeList <- vector("list", ncol(x))
     for(i in seq_along(nodeList)) {
       nodeList[[i]] <- x[,i]
     }

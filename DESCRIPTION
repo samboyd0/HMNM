@@ -27,5 +27,9 @@ Suggests:
     parallel,
     foreach,
     knitr,
-    rmarkdown
+    rmarkdown,
+    clusterProfiler,
+    AnnotationDbi,
+    ReactomePA,
+    DOSE
 VignetteBuilder: knitr
