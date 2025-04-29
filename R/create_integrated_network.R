@@ -194,6 +194,11 @@ create_integrated_network <- function(network_layers, bipartite_networks = NULL,
     # Combine layers
     all_networks <- c(network_layers)
   }
+  
+  # Remove NULL entries, which result from a failed attempt to apply bipartite mappings between two layers
+  all_networks <- all_networks[!sapply(all_networks, is.null)]
+  if(length(all_networks) == 0) stop("Network checks resulted in all NULL values. This is an unexpected error. Please re-check network inputs.")
+  
   #== END INPUT CHECK: bipartite_networks
   
   
@@ -244,7 +249,7 @@ create_integrated_network <- function(network_layers, bipartite_networks = NULL,
         } else e.attrs[[j]] <- c(e.attrs[[j]], rep(NA, igraph::ecount(all_networks[[i]])))
       }
     } else {
-      edge_list[[i]] <- all_networks[[i]][,1:2]
+      edge_list[[i]] <- all_networks[[i]][,1:2, drop=FALSE]
       for(j in seq_along(e.attrs)) {
         if(names(e.attrs)[j] == "weight") {
           e.attrs[[j]] <- c(e.attrs[[j]], all_networks[[i]][,3])
@@ -653,7 +658,7 @@ process_network_layers <- function(obj, obj_name, obj_type, multi, directed, net
     } else obj_weights <- 1
     
     if(any(grepl("\\|", obj))) {
-      orig_el <- obj[,1:2]
+      orig_el <- obj[,1:2, drop=FALSE]
       random_delim <- "XxXA5t6V1b9xXx" # random delimiter to ensure preservation of original node names
       max_iterations <- 100 # Safety limit for attempts
       attempts <- 0
@@ -661,7 +666,7 @@ process_network_layers <- function(obj, obj_name, obj_type, multi, directed, net
         if(!any(grepl(random_delim, orig_el))) break
         random_delim <- paste0(random_delim, paste(sample(c(0:9, letters, LETTERS), 5), collapse = ""))
         attempts <- attempts + 1
-        if(attempts > max_iterations) stop("Failed to generate a unique delimiter after ", max_iterations, " attempts. Ensure node names do not contain '|'.")
+        if(attempts > max_iterations) stop("Failed to generate a unique delimiter after ", max_iterations, " attempts. To avoid this, ensure node names do not contain '|'.")
       }
       orig_el[,1] <- paste(orig_el[,1], orig_el[,"layer1"], sep = random_delim)
       orig_el[,2] <- paste(orig_el[,2], orig_el[,"layer2"], sep = random_delim)
@@ -672,13 +677,13 @@ process_network_layers <- function(obj, obj_name, obj_type, multi, directed, net
       obj[,1] <- paste(obj[,1], obj[,"layer1"], sep = "|")
       obj[,2] <- paste(obj[,2], obj[,"layer2"], sep = "|")
       
-      obj <- igraph::graph_from_edgelist(el = obj[,1:2], directed = directed)
-      V(obj)$original_name <- unique(as.character(t(orig_el[,1:2])))
+      obj <- igraph::graph_from_edgelist(el = obj[,1:2, drop=FALSE], directed = directed)
+      V(obj)$original_name <- unique(as.character(t(orig_el[,1:2, drop=FALSE])))
     } else {
       obj[,1] <- paste(obj[,1], obj[,"layer1"], sep = "|")
       obj[,2] <- paste(obj[,2], obj[,"layer2"], sep = "|")
       
-      obj <- igraph::graph_from_edgelist(el = obj[,1:2], directed = directed)
+      obj <- igraph::graph_from_edgelist(el = obj[,1:2, drop=FALSE], directed = directed)
       V(obj)$original_name <- extract_string(V(obj)$name, "\\|", 1)
     }
     
@@ -749,6 +754,7 @@ process_bipartite_networks <- function(obj, obj_name, obj_type, network_layers, 
     if(any(!tmp_leaf_nodes %in% obj_leaf_nodes) || any(!obj_leaf_nodes %in% tmp_leaf_nodes)) stop("For ", obj_name, ": Values of 'layer1' & 'layer2' columns must match hierarchicy nodes corresponding to the bipartite network input.")
   } else if(obj_type == "keyword") {
     obj <- connect_layers(bp_name = obj_name, network_layers = network_layers, network_hierarchy = network_hierarchy)
+    if(is.null(obj)) return(obj)
     obj_type <- "edgelist"
   }
   
@@ -779,7 +785,7 @@ process_bipartite_networks <- function(obj, obj_name, obj_type, network_layers, 
     }
     if("weight" %in% colnames(obj)) {
       obj <- obj[,c(1,2,which(colnames(obj) == "weight"))]
-    } else obj <- cbind(obj[,1:2], 1)
+    } else obj <- cbind(obj[,1:2, drop=FALSE], 1)
   }
   
   # At this point, all objects will be an edgelist with a third column of weights
@@ -867,6 +873,7 @@ connect_layers <- function(obj = NULL, bp_name, network_layers, network_hierarch
     }
   }
   el <- do.call(rbind, el)
+  
   return(el)
 }
 
@@ -948,6 +955,11 @@ apply_bp_mapping = function(layers, c1_ids, c2_ids, c1_layers, c2_layers, weight
   
   # Check if both keys are in `valid_keys`
   matches <- keys_1 %in% valid_keys & keys_2 %in% valid_keys
+  
+  if(sum(matches) == 0) {
+    warning("No matches when attempting explicit mapping between the following layers: ", paste(layers, collapse = ", "))
+    return(NULL)
+  } 
   
   # Extract results based on matches
   new_el <- matrix(c(keys_1[matches],
