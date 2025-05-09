@@ -36,12 +36,12 @@
 #' 
 #' __crosstalk_params__ and __seed_weights__ are additional sets of parameters that allow fine control over diffusion dynamics during [RWR()].
 #' 
-#' __crosstalk_params__ are parameters that control the amount of information shared between layers. They represent the probability of the random walker to jump from the current layer to another through a bipartite edge during RWR.
+#' __crosstalk_params__ are parameters that control the amount of information shared between layers. They represent the probability of the random walker to jump from the current layer to another through a bipartite edge during RWR. If argument is NULL (default), then 
 #' 
 #' __seed_weights__ represent the relative weight to give to seeds values of a certain layer or sets of layers. These should be supplied for all sets of categories in hierarchy that share a common parent (i.e., siblings).
 #' 
 #' @note
-#' Uses _node_specific_restart_=TRUE for `RWR()`, with _node_connectivity_score_ coming from `node_connectivity_score(..., inverse=TRUE, mode="core")`.
+#' This algorithm uses node-specific restart values for RWR, i.e., it uses _node_specific_restart_=TRUE for `RWR()`, with _node_connectivity_score_ coming from `node_connectivity_score(..., inverse=TRUE, mode="core")`, such that nodes with larger coreness have lower restart value.
 #' 
 #' @inheritParams create_integrated_network
 #' @inheritParams RWR
@@ -112,7 +112,7 @@
 module_identification <- function(network_layers, bipartite_networks = NULL, network_hierarchy = NULL, n = NULL, data = NULL, brw_attr = NULL,
                                   FUN = NULL, FUN_params = NULL, directed = FALSE, aggregate_layers = NULL,
                                   normalize = c("degree", "penalized_degree"), k = 0.5, degree_bias = NULL,
-                                  crosstalk_params = NULL, seed_weights = NULL, verbose = FALSE, 
+                                  crosstalk_params = NULL, seed_weights = NULL, error_metric = NULL, verbose = FALSE, 
                                   in_parallel = FALSE, n_cores = NULL, eta = NULL){
   start_time <- Sys.time()
   
@@ -132,6 +132,7 @@ module_identification <- function(network_layers, bipartite_networks = NULL, net
                                      FUN_params = FUN_params,
                                      directed = directed,
                                      brw_attr = brw_attr,
+                                     error_metric = error_metric,
                                      lcc = TRUE)
   graph <- g_int$network
   network_hierarchy <- g_int$hierarchy
@@ -477,15 +478,17 @@ core_cc <- function(g, weight = TRUE) {
 #' @title Calculate a node-wise connectivity score
 #' 
 #' @description
-#' Calculates a centrality or several centrality metrics and converts to empirical cumulative probabilities. inverse=TRUE multiplies values by -1 before ECDF calculation.
+#' Calculates one or several centrality metrics and converts to empirical cumulative probabilities. Used to set node-specific restart values in RWR (with inverse=TRUE).
 #' 
 #' @details
+#' 
 #' For mode="core", only considers the coreness of nodes when calculating ECDF. For mode="mix", it considers a mix of betweenness centrality, harmonic centrality, and core clustering coefficient, aggregated by applying ECDF to each score individually then taking a weighted average of these probabilities.
+#' When inverse=TRUE, multiplies values by -1 before ECDF calculation. 
 #'
 #' @param graph igraph
 #' @param net_diam_prop numeric. Proportion of graph to use when calculating betweenness and harmonic centrality, for mode="mix" only.
 #' @param inverse Logical. Whether to return values inversely related to connectivity measure selected in __mode__.
-#' @param mode character scalar. One of "core" or "mix"
+#' @param mode character scalar. One of "core" or "mix". Default is "core"
 #' 
 #' @returns numeric vector
 #' 
@@ -694,6 +697,11 @@ restart_grid_search <- function(orig_net, agg_net, network_hierarchy, normalize,
   FILTERING_RATE_DIFF <- 0.25
   GRID_NET_SIZE <- 100000
   #=========================#
+  
+  # Modifying seed_weights to depend on error_metric argument. 
+  if("error_metric" %in% igraph::vertex_attr_names(orig_net)) {
+    seed_weights <- set_seedweight_params(network = orig_net, network_hierarchy = network_hierarchy)
+  }
   
   # Normalize adjacency matrix to get transition matrix
   tmat <- transition_matrix(network = orig_net,

@@ -20,6 +20,7 @@ AMEND(
   degree_bias = NULL,
   crosstalk_params = NULL,
   seed_weights = NULL,
+  error_metric = NULL,
   verbose = FALSE,
   in_parallel = FALSE,
   n_cores = NULL,
@@ -55,6 +56,8 @@ AMEND(
 
 \item{seed_weights}{A list of named numeric vectors, or NULL (default). List elements should correspond to sibling sets of categories in network hierarchy. Values in each set must sum to one. NULL gives uniform values within each sibling set.}
 
+\item{error_metric}{Similar format as \strong{data}. A measure of uncertainty associated with values in \emph{data}. Used to set seed weights-in AMEND algorithm-in a (hopefully) smart and automatic way. The higher the average error of a layer, the lower the weight given to the seed vector of that layer. NULL (default) translates to uniform seed weights or user-supplied seed weights.}
+
 \item{verbose}{Logical. Whether to print information on algorithm progress.}
 
 \item{in_parallel}{Logical. Whether to run certain operations in parallel, using the \emph{parallel}, \emph{doParallel} and \emph{foreach} packages.}
@@ -81,7 +84,7 @@ a named list of additional class "AMENDresult", with the following elements:
 Given a network (or several networks, to be connected) with node-wise data, this function uses the \strong{AMEND} algorithm to identify a single module containing highly-connected nodes with large data values. \code{module_identification()} and \code{AMEND()} are aliases.
 }
 \note{
-Uses \emph{node_specific_restart}=TRUE for \code{RWR()}, with \emph{node_connectivity_score} coming from \code{node_connectivity_score(..., inverse=TRUE, mode="core")}.
+This algorithm uses node-specific restart values for RWR, i.e., it uses \emph{node_specific_restart}=TRUE for \code{RWR()}, with \emph{node_connectivity_score} coming from \code{node_connectivity_score(..., inverse=TRUE, mode="core")}, such that nodes with larger coreness have lower restart value.
 }
 \section{Algorithm Overview}{
 
@@ -124,7 +127,7 @@ In multilayer networks, there is the option to aggregate sets of layers after \c
 
 \strong{crosstalk_params} and \strong{seed_weights} are additional sets of parameters that allow fine control over diffusion dynamics during \code{\link[=RWR]{RWR()}}.
 
-\strong{crosstalk_params} are parameters that control the amount of information shared between layers. They represent the probability of the random walker to jump from the current layer to another through a bipartite edge during RWR.
+\strong{crosstalk_params} are parameters that control the amount of information shared between layers. They represent the probability of the random walker to jump from the current layer to another through a bipartite edge during RWR. If argument is NULL (default), then
 
 \strong{seed_weights} represent the relative weight to give to seeds values of a certain layer or sets of layers. These should be supplied for all sets of categories in hierarchy that share a common parent (i.e., siblings).
 }

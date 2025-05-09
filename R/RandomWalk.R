@@ -188,7 +188,7 @@ RWR <- function(tmat, seeds = NULL, seed_weights = NULL, restart = 0.5, network_
   
   #=== seed_weights checks ===#
   # list of named numeric vectors or NULL
-  if(is.null(seed_weights)) {
+  if(is.null(seed_weights)) { # Assign uniform values within each sibling set
     sw <- seed_weight_sets(network_hierarchy)
     names(sw) <- unlist(lapply(sw, function(x) paste(x, collapse = "|")))
     
@@ -351,9 +351,13 @@ transition_matrix <- function(network, network_hierarchy, normalize = c("degree"
   # crosstalk_params is a named numeric vector, or NULL. If non-NULL, names correspond to nodes in hierarchy.
   # Values must be between zero and one.
   if(is.null(crosstalk_params)) {
+    crosstalk_params <- set_crosstalk_params(network = network, network_hierarchy = network_hierarchy, control = NULL)
+  }
+  # crosstalk_params will still be NULL for single-layer networks
+  if(is.null(crosstalk_params)) { 
     crosstalk_params <- rep(DEFAULT_CROSSTALK, igraph::vcount(network_hierarchy))
     names(crosstalk_params) <- V(network_hierarchy)$name
-  }else if(is.numeric(crosstalk_params)) {
+  } else if(is.numeric(crosstalk_params)) {
     if(is.null(names(crosstalk_params))) stop("crosstalk_params must be a named numeric vector or NULL.")
     if(any(crosstalk_params > 1) || any(crosstalk_params < 0)) stop("crosstalk_params values must be between 0 and 1.")
     
@@ -363,6 +367,7 @@ transition_matrix <- function(network, network_hierarchy, normalize = c("degree"
     crosstalk_params <- c(crosstalk_params, add_ct_params)
     crosstalk_params[V(network_hierarchy)$name[V(network_hierarchy)$level == 0]] <- 0
   }else stop("Unrecognized input for crosstalk_params. Must be a named numeric vector or NULL.")
+  
   
   #=== degree_bias Checks ===#
   # Must be NULL, a character vector, or a named list
@@ -628,7 +633,7 @@ scale_rows <- function(adjM, x = NULL, k = NULL) {
   return(Matrix::drop0(adjM))
 }
 
-
+## TO-DO (5/8/2025): annotate code for inter-category adj mat normalization! Code is correct, but I've forgotten the logic behind it :(
 #' @title Normalize an adjacency matrix in a hierarchical fashion
 #'
 #' @description `normalize_adjmat()` efficiently constructs a transition matrix from an adjacency matrix whose nodes are categorized by a hierarchy. 
@@ -705,7 +710,6 @@ normalize_adjmat <- function(adj_mat, norm, k, layers, brw_attr, network_hierarc
       others <- lineages[match(tmp_layers[r_ids], lineages[,1]),,drop=FALSE]
       
       other_ids <- vector("list", max_level + 1)
-      link_status <- numeric(max_level + 1)
       for(j in seq_along(other_ids)) {
         if(j == 1) {
           other_ids[[1]] <- which(others[,1] == current[1])
@@ -754,7 +758,6 @@ normalize_adjmat <- function(adj_mat, norm, k, layers, brw_attr, network_hierarc
       others <- lineages[match(tmp_layers[r_ids], lineages[,1]),,drop=FALSE]
       
       other_ids <- vector("list", max_level + 1)
-      link_status <- numeric(max_level + 1)
       for(j in seq_along(other_ids)) {
         if(j == 1) {
           other_ids[[1]] <- which(others[,1] == current[1])
@@ -859,6 +862,179 @@ normalize_seeds <- function(seeds, layers, network_hierarchy, seed_weights, leve
 }
 
 
+#' @title Set crosstalk parameter values
+#'
+#' @description Crosstalk parameters are set for each category in the network hierarchy based on the edge density of its associated layers in a multilayer network.
+#'
+#' @details 
+#' The basic intuition is that larger crosstalk values mean larger probabilites of the random walker jumping to another layer which means less exploration of the current layer. To set these values automatically, an inverse sigmoid mapping is used to map layer-specific edge densities to jump probabilities. With higher edge density, there is more for the random walker to explore, so crosstalk values should be lower.
+#'
+#' _control_ is a list of arguments for the inverse sigmoid mapping. _p_min_ is the minimum crosstalk probability, _p_max_ is the maximum, and _b_ is the slope parameter for the sigmoid function.
+#'
+#' Returns NULL for single-layer networks.
+#'
+#' @param network igraph object of multilayer network
+#' @param network_hierarchy igraph object of network hierarchy
+#' @param control list of additional arguments to control mapping between edge density and jump probability. Can include "p_min", "p_max", and "b" (See Details). Additional elements will be ignored.
+#'
+#' @returns named numeric vector of crosstalk parameters for each hierarchical category
+#' 
+#' @noRd
+#'
+set_crosstalk_params <- function(network, network_hierarchy, control = NULL) {
+  # Assume network and hierarchy are in proper format
+  
+  inverse_sigmoid_mapping <- function(x, p_min = 0.2, p_max = 0.8, b = 50) {
+    if(p_min >= p_max) stop("p_min must be strictly less than p_max.")
+    # Setting b automatically based on spread of input values (?)
+    # if(is.null(b)) {
+    #   repeat {
+    #     tmp <- 
+    #     if(tmp >= 0.1) break
+    #   }
+    # }
+    mu <- mean(x)
+    res <- p_min + (p_max - p_min) * (1 - 1 / (1 + exp(-b * (x - mu))))
+    return(res)
+  }
+  
+  default_value <- c(p_min = 0.2, p_max = 0.8, b = 50)
+  
+  # control checks... list. if not a list or the list doesn't contain the necessary arguments for inverse_sigmoid_mapping, use defaults
+  if(is.list(control)) {
+    for(i in seq_along(default_value)) {
+      if(!names(default_value)[i] %in% names(control)) {
+        control <- c(control, default_value[i])
+        names(control)[length(control)] <- names(default_value)[i]
+      }
+    }
+    # Remove unnecessary elements
+    control <- control[names(control) %in% names(default_value)]
+  } else {
+    control <- default_value
+  }
+  
+  # For each level of hierarchy (starting from max level, i.e., bottom level)
+  #   -Define sibling sets
+  #   For each sibling set with at least two hierarchy categories
+  #     For each node in sibling set
+  #       -Identify all descendant layers
+  #       -Induce subgraph of these layers
+  #       -compute edge density
+  #     Calculate crosstalk parameter values
+  max_level <- max(V(network_hierarchy)$level)
+  level <- 0:(max_level - 1)
+  ctp <- NULL
+  for(i in seq_along(level)) { # For each level
+    l <- max_level - level[i]
+    # Define sibling sets
+    sibs <- get_siblings(network_hierarchy, l)
+    for(s in seq_along(sibs)) { # For each sibling set
+      if(length(sibs[[s]]) == 1) next
+      ed <- numeric(length(sibs[[s]]))
+      for(h in seq_along(sibs[[s]])) { # For each category in sibling set
+        # Identify all descendant layers
+        leaf_nodes <- get_leaf_nodes(network_hierarchy, node = sibs[[s]][h])
+        # Induce subgraph of these layers
+        subg <- igraph::induced_subgraph(graph = network, vids = which(V(network)$layer %in% leaf_nodes))
+        # Compute edge density
+        ed[h] <- igraph::edge_density(graph = subg) 
+      }
+      tmp <- setNames(do.call(inverse_sigmoid_mapping, c(list(x = ed), control)), sibs[[s]])
+      ctp <- c(ctp, tmp)
+    }
+  }
+  return(ctp)
+}
+
+
+#' @title Set seed weights
+#'
+#' @description 
+#' This function computes weights to be applied to sets of seed vectors coming from different layers in multilayer networks.
+#'
+#' @details 
+#' Each category in the network hierarchy will have an associated seed weight, which sum to one within each sibling set of categories. Within each sibling set, and for each category within these sets, the seed weights are obtained by calculating the average (across nodes of the corresponding layers) of a user-specified error metric of the data from which seed values were derived. 
+#' 
+#' The mapping from the average error to the seed weights is based on a softmax function. The results of this softmax function (with slope parameter _b_) are stretched to fit within certain bounds (_p_min_, _p_max_) and then scaled to sum to one. This stretching and scaling is done iteratively until all values fall within the specified bounds and sum to one, or if the maximum number of iterations has been reached (_max_count_). 
+#'
+#' @param network igraph object of multilayer network
+#' @param network_hierarchy igraph object of network hierarchy
+#' @param control list of additional arguments to control mapping between edge density and jump probability. Can include "p_min", "p_max", "b", and "max_count" (See Details). Additional elements will be ignored.
+#'
+#' @returns a list of numeric vectors containg seed weights for each sibling set in hierarchy
+#'
+#' @noRd
+#'
+set_seedweight_params <- function(network, network_hierarchy, control = NULL) {
+  # Assume network and hierarchy are in proper format
+  V_ATTR_NAME <- "error_metric"
+  
+  softmax_stretch_scale <- function(x, p_min = 0.2, p_max = 0.8, b = 1, max_count = 500) {
+    if(p_min >= p_max) stop("p_min must be strictly less than p_max.")
+    # Softmax function
+    res <- exp(-b * x) / sum(exp(-b * x))
+    # Iteratively stretch and scale until all values are in desired range and sum to 1
+    count <- 0
+    repeat {
+      res <- p_min + (p_max - p_min) * res
+      res <- res / sum(res)
+      if((min(res) >= p_min && max(res) <= p_max) || count == max_count) break
+      count <- count + 1
+    }
+    return(res)
+  }
+  
+  default_value <- c(p_min = 0.2, p_max = 0.8, b = 1, max_count = 500)
+  
+  # control checks... list. if not a list or the list doesn't contain the necessary arguments for softmax_stretch_scale, use defaults
+  if(is.list(control)) {
+    for(i in seq_along(default_value)) {
+      if(!names(default_value)[i] %in% names(control)) {
+        control <- c(control, default_value[i])
+        names(control)[length(control)] <- names(default_value)[i]
+      }
+    }
+    # Remove unnecessary elements
+    control <- control[names(control) %in% names(default_value)]
+  } else {
+    control <- default_value
+  }
+  
+  # For each level of hierarchy (starting from max level, i.e., bottom level)
+  #   -Define sibling sets
+  #   For each sibling set with at least two hierarchy categories
+  #     For each node in sibling set
+  #       -Identify all descendant layers
+  #       -Compute average uncertainty across all nodes from these layers
+  #     Calculate seed-weight parameter values
+  # Return: list of named numeric vectors. list elements are sibling sets
+  max_level <- max(V(network_hierarchy)$level)
+  level <- 0:(max_level - 1)
+  swp <- list()
+  for(i in seq_along(level)) { # For each level
+    l <- max_level - level[i]
+    # Define sibling sets
+    sibs <- get_siblings(network_hierarchy, l)
+    for(s in seq_along(sibs)) { # For each sibling set
+      if(length(sibs[[s]]) == 1) next
+      val <- numeric(length(sibs[[s]]))
+      for(h in seq_along(sibs[[s]])) { # For each category in sibling set
+        # Identify all descendant layers
+        leaf_nodes <- get_leaf_nodes(network_hierarchy, node = sibs[[s]][h])
+        # Induce subgraph of these layers
+        subg <- igraph::induced_subgraph(graph = network, vids = which(V(network)$layer %in% leaf_nodes))
+        # Compute edge density
+        val[h] <- mean(igraph::vertex_attr(subg, V_ATTR_NAME), na.rm = TRUE)
+      }
+      tmp <- setNames(do.call(softmax_stretch_scale, c(list(x = val), control)), sibs[[s]])
+      swp <- c(swp, list(tmp))
+    }
+  }
+  return(swp)
+}
+
+
 # Get the parents of categories (h_nodes) in a network hierarchy (g)
 get_parents <- function(g, h_nodes) {
   # For given hierarchical nodes, find parents
@@ -867,23 +1043,6 @@ get_parents <- function(g, h_nodes) {
   nei <- unlist(lapply(igraph::neighborhood(graph = g, order = 1, nodes = ids, mode = 'in'), function(x) x[!x %in% ids]))
   h_node_parents <- names(nei)[match(h_nodes, uniq_h_nodes)]
   return(h_node_parents)
-}
-
-
-# Get all descendants, including the queried items, between categories (h_nodes) and leaf nodes (leaves) in a network hierarchy (g).
-get_descendants <- function(g, h_nodes, leaves) {
-  comb <- paste(h_nodes, leaves, sep = "|")
-  uniq_comb <- unique(comb)
-  tmp <- vector("list", length(uniq_comb)); names(tmp) <- uniq_comb
-  for(i in seq_along(tmp)) {
-    l <- extract_string(names(tmp)[i], "\\|", 0)
-    node_id <- match(l[1], V(g)$name)
-    leaf_id <- match(l[2], V(g)$name)
-    tmp[[i]] <- as.numeric(igraph::shortest_paths(graph = g, from = node_id, to = leaf_id, mode = 'out')$vpath[[1]])
-    tmp[[i]] <- V(g)$name[tmp[[i]]]
-  }
-  res <- unname(tmp[match(comb, uniq_comb)])
-  return(res)
 }
 
 
@@ -939,5 +1098,11 @@ get_siblings <- function(g, level = "all") {
   }
   return(sibs)
 }
+
+
+
+
+
+
 
 

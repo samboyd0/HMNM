@@ -18,16 +18,17 @@ node_connectivity_score(
 
 \item{inverse}{Logical. Whether to return values inversely related to connectivity measure selected in \strong{mode}.}
 
-\item{mode}{character scalar. One of "core" or "mix"}
+\item{mode}{character scalar. One of "core" or "mix". Default is "core"}
 }
 \value{
 numeric vector
 }
 \description{
-Calculates a centrality or several centrality metrics and converts to empirical cumulative probabilities. inverse=TRUE multiplies values by -1 before ECDF calculation.
+Calculates one or several centrality metrics and converts to empirical cumulative probabilities. Used to set node-specific restart values in RWR (with inverse=TRUE).
 }
 \details{
 For mode="core", only considers the coreness of nodes when calculating ECDF. For mode="mix", it considers a mix of betweenness centrality, harmonic centrality, and core clustering coefficient, aggregated by applying ECDF to each score individually then taking a weighted average of these probabilities.
+When inverse=TRUE, multiplies values by -1 before ECDF calculation.
 }
 \examples{
 net <- create_integrated_network(network_layers = simple_network, lcc = TRUE)$network

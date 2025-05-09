@@ -13,6 +13,7 @@ create_integrated_network(
   FUN_params = NULL,
   directed = FALSE,
   brw_attr = NULL,
+  error_metric = NULL,
   lcc = FALSE,
   in_parallel = FALSE,
   n_cores = NULL
@@ -32,6 +33,8 @@ create_integrated_network(
 \item{directed}{Logical. Whether the input network should be treated as directed.}
 
 \item{brw_attr}{Similar format as \strong{data}. Contains values to be used in a biased random walk. Should contain non-negative values.}
+
+\item{error_metric}{Similar format as \strong{data}. A measure of uncertainty associated with values in \emph{data}. Used to set seed weights-in AMEND algorithm-in a (hopefully) smart and automatic way. The higher the average error of a layer, the lower the weight given to the seed vector of that layer. NULL (default) translates to uniform seed weights or user-supplied seed weights.}
 
 \item{lcc}{Logical. Whether to take the largest connected component of the resulting network.}
 

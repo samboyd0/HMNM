@@ -22,6 +22,7 @@
 #' @param FUN_params List or list of lists, containing additional function arguments for functions given in __FUN__. NULL (default) doesn't supply any additional function arguments.
 #' @param directed Logical. Whether the input network should be treated as directed.
 #' @param brw_attr Similar format as __data__. Contains values to be used in a biased random walk. Should contain non-negative values.
+#' @param error_metric Similar format as __data__. A measure of uncertainty associated with values in _data_. Used to set seed weights-in AMEND algorithm-in a (hopefully) smart and automatic way. The higher the average error of a layer, the lower the weight given to the seed vector of that layer. NULL (default) translates to uniform seed weights or user-supplied seed weights.
 #' @param lcc Logical. Whether to take the largest connected component of the resulting network.
 #' @param in_parallel Logical. Whether to run certain operations in parallel, using the _parallel_, _doParallel_ and _foreach_ packages.
 #' @param n_cores Numeric scalar or NULL (default). Number of cores to use during parallel processing. If NULL and in_parallel=TRUE, defaults to two-thirds the number of cores detected on machine.
@@ -58,7 +59,7 @@
 #' @export
 #' 
 create_integrated_network <- function(network_layers, bipartite_networks = NULL, network_hierarchy = NULL, data = NULL, FUN = NULL, 
-                                      FUN_params = NULL, directed = FALSE, brw_attr = NULL, lcc = FALSE, in_parallel = FALSE, n_cores = NULL) {
+                                      FUN_params = NULL, directed = FALSE, brw_attr = NULL, error_metric = NULL, lcc = FALSE, in_parallel = FALSE, n_cores = NULL) {
   #== START INPUT CHECK: network_hierarchy 
   if(is.null(network_hierarchy)) {
     if(!is.null(bipartite_networks) || (is.list(network_layers) && length(network_layers) > 1 && !igraph::is_igraph(network_layers))) stop("network_hierarchy must be supplied if bipartite_networks is non-null or network_layers is a list of several network objects, i.e., if the network inputs form a multilayer network.")
@@ -344,6 +345,33 @@ create_integrated_network <- function(network_layers, bipartite_networks = NULL,
   }
   
   
+  #=============#
+  # error_metric
+  #=============#
+  if(is.list(error_metric) || is.numeric(error_metric)) {
+    if(is.null(names(error_metric))) stop("If error_metric is a list, it must be named.")
+    
+    if(is.numeric(error_metric)) {
+      error_metric <- list(error_metric)
+      names(error_metric) <- V(network_hierarchy)$name[root_node_id]
+    } 
+    
+    if(any(!names(error_metric) %in% V(network_hierarchy)$name)) stop("For error_metric, names of list elements must match nodes in hierarchy.")
+    
+    for(i in seq_along(error_metric)) {
+      leaf_nodes <- get_leaf_nodes(network_hierarchy, node = names(error_metric)[i])
+      for(j in seq_along(leaf_nodes)) {
+        key_names <- paste(gsub(pattern = "\\|", replacement = "_", x = names(error_metric[[i]])), leaf_nodes[j], sep = "|")
+        id <- match(V(graph)$name, key_names)
+        igraph::vertex_attr(graph, "error_metric", which(!is.na(id))) <- unname(error_metric[[i]][id[!is.na(id)]])
+      }
+    }
+  } else if(is.character(error_metric) && length(error_metric) == 1) {
+    if(!error_metric %in% igraph::vertex_attr_names(graph)) stop("For error_metric: No vertex attribute '", error_metric,"' found.")
+    V(graph)$error_metric <- igraph::vertex_attr(graph, error_metric)
+  } else if(!is.null(error_metric)) stop("Unrecognized error_metric argument. Must be a named list, numeric vector, character string, or NULL.")
+  
+  
   #===========#
   # FUN Checks
   #===========#
@@ -411,7 +439,6 @@ create_integrated_network <- function(network_layers, bipartite_networks = NULL,
         # Z_tmp <- (seeds_tmp - stats::median(seeds_tmp)) / stats::mad(seeds_tmp, constant = 1) # 'robust' Z-score
         # Z_tmp <- stats::ecdf(seeds_tmp)(seeds_tmp) 
       }
-      
       
       if(!all_good(seeds_tmp)) stop("For layer ", leaf_nodes[j],": Applying 'FUN' to 'data' to compute seed values resulted in either negative or all zero values.")
       
