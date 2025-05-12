@@ -884,7 +884,7 @@ normalize_seeds <- function(seeds, layers, network_hierarchy, seed_weights, leve
 set_crosstalk_params <- function(network, network_hierarchy, control = NULL) {
   # Assume network and hierarchy are in proper format
   
-  inverse_sigmoid_mapping <- function(x, p_min = 0.2, p_max = 0.8, b = 50) {
+  inverse_sigmoid_mapping <- function(x, p_min = 0.2, p_max = 0.8, b = 10) {
     if(p_min >= p_max) stop("p_min must be strictly less than p_max.")
     # Setting b automatically based on spread of input values (?)
     # if(is.null(b)) {
@@ -898,7 +898,7 @@ set_crosstalk_params <- function(network, network_hierarchy, control = NULL) {
     return(res)
   }
   
-  default_value <- c(p_min = 0.2, p_max = 0.8, b = 50)
+  default_value <- c(p_min = 0.2, p_max = 0.8, b = 10)
   
   # control checks... list. if not a list or the list doesn't contain the necessary arguments for inverse_sigmoid_mapping, use defaults
   if(is.list(control)) {
@@ -940,7 +940,16 @@ set_crosstalk_params <- function(network, network_hierarchy, control = NULL) {
         # Compute edge density
         ed[h] <- igraph::edge_density(graph = subg) 
       }
-      tmp <- setNames(do.call(inverse_sigmoid_mapping, c(list(x = ed), control)), sibs[[s]])
+      rm_id <- which(is.nan(ed))
+      if(length(rm_id) > 0) {
+        if(length(rm_id) == length(ed)) {
+          tmp <- NULL
+        } else {
+          tmp <- setNames(do.call(inverse_sigmoid_mapping, c(list(x = ed[-rm_id]), control)), sibs[[s]][-rm_id])
+        }
+      } else {
+        tmp <- setNames(do.call(inverse_sigmoid_mapping, c(list(x = ed), control)), sibs[[s]])
+      }
       ctp <- c(ctp, tmp)
     }
   }
@@ -1024,10 +1033,20 @@ set_seedweight_params <- function(network, network_hierarchy, control = NULL) {
         leaf_nodes <- get_leaf_nodes(network_hierarchy, node = sibs[[s]][h])
         # Induce subgraph of these layers
         subg <- igraph::induced_subgraph(graph = network, vids = which(V(network)$layer %in% leaf_nodes))
-        # Compute edge density
+        # Compute mean of user-specified error metric / uncertainty metric
         val[h] <- mean(igraph::vertex_attr(subg, V_ATTR_NAME), na.rm = TRUE)
       }
-      tmp <- setNames(do.call(softmax_stretch_scale, c(list(x = val), control)), sibs[[s]])
+      bad_id <- which(is.nan(val)) 
+      if(length(bad_id) > 0) {
+        if(length(bad_id) == length(val)) { # If all values are NaN
+          tmp <- setNames(rep(1/length(val), length(val)), sibs[[s]]) # Set uniform values
+        } else {
+          val[bad_id] <- mean(val, na.rm = TRUE) # Set NaN values to be average of the non-NaN values
+          tmp <- setNames(do.call(softmax_stretch_scale, c(list(x = val), control)), sibs[[s]])
+        }
+      } else {
+        tmp <- setNames(do.call(softmax_stretch_scale, c(list(x = val), control)), sibs[[s]])
+      }
       swp <- c(swp, list(tmp))
     }
   }
