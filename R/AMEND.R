@@ -820,7 +820,7 @@ restart_grid_search <- function(orig_net, agg_net, network_hierarchy, normalize,
   
   rm_id <- unique(c(rm_id, which(score_metrics[,1] %in% c(0, NA))))
   if(length(rm_id) != 0) {
-    score_metrics <- score_metrics[-rm_id,]
+    score_metrics <- score_metrics[-rm_id,,drop=FALSE]
     nets <- nets[-rm_id]
   }
   
