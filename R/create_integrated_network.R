@@ -675,7 +675,7 @@ process_network_layers <- function(obj, obj_name, obj_type, multi, directed, net
     orig_names <- rownames(obj)
     rownames(obj) <- gsub(pattern = "\\|", replacement = "_", x = rownames(obj))
     rownames(obj) <- paste(rownames(obj), attr(obj, "layer"), sep = "|")
-    obj <- igraph::graph_from_adjacency_matrix(adjmatrix = obj, mode = ifelse(directed, "directed", "undirected"), weighted = TRUE, diag = FALSE, add.rownames = TRUE)
+    obj <- igraph::graph_from_adjacency_matrix(adjmatrix = obj, mode = ifelse(directed, "directed", "undirected"), weighted = TRUE, diag = FALSE, add.rownames = NULL, add.colnames = NA)
     V(obj)$original_name <- orig_names
     V(obj)$layer <- extract_string(V(obj)$name, "\\|", 2)
   } else if(obj_type == "edgelist") {
@@ -799,7 +799,7 @@ process_bipartite_networks <- function(obj, obj_name, obj_type, network_layers, 
   } else if(obj_type == "adjmat") {
     rownames(obj) <- gsub(pattern = "\\|", replacement = "_", x = rownames(obj))
     rownames(obj) <- paste(rownames(obj), attr(obj, "layer"), sep = "|")
-    obj <- igraph::graph_from_adjacency_matrix(adjmatrix = obj, mode = ifelse(directed, "directed", "undirected"), weighted = TRUE, diag = FALSE, add.rownames = TRUE)
+    obj <- igraph::graph_from_adjacency_matrix(adjmatrix = obj, mode = ifelse(directed, "directed", "undirected"), weighted = TRUE, diag = FALSE, add.rownames = NULL, add.colnames = NA)
     tmp_obj <- igraph::as_edgelist(obj, names = TRUE)
     tmp_obj <- cbind(tmp_obj, E(obj)$weight)
     obj <- tmp_obj
