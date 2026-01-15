@@ -575,7 +575,7 @@ create_aggregated_graph <- function(graph, agg_sets, agg_fun, directed) {
     # Strip layer info from node labels in primary layer
     v_targets <- all_nodes[primary_ids]
     V(graph)$name[primary_ids] <- paste(v_targets, new_layer_name, sep = "|")
-    V(graph)$agg_layer[primary_ids] <- new_layer_name
+    V(graph)$agg_layer[V(graph)$layer %in% agg_sets[[i]]] <- new_layer_name
     
     for(j in seq_along(other_layers)) {
       other_flag <- all_layers == other_layers[j]
